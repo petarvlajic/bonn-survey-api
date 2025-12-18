@@ -1,0 +1,578 @@
+import express, { Request, Response } from 'express';
+import { User } from '../models/User';
+import { hashPassword, comparePassword } from '../utils/password';
+import { generateToken } from '../utils/jwt';
+import { validateRegister, validateLogin } from '../middleware/validation';
+import { authenticate } from '../middleware/auth';
+
+const router = express.Router();
+
+/**
+ * @swagger
+ * /api/auth/register:
+ *   post:
+ *     summary: Register a new user
+ *     tags: [Authentication]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - password
+ *               - firstName
+ *               - lastName
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 description: Must end with @ukbonn.de
+ *               password:
+ *                 type: string
+ *                 minLength: 6
+ *               firstName:
+ *                 type: string
+ *               lastName:
+ *                 type: string
+ *               phone:
+ *                 type: string
+ *               avatar:
+ *                 type: string
+ *               position:
+ *                 type: string
+ *     responses:
+ *       201:
+ *         description: User created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 user:
+ *                   $ref: '#/components/schemas/User'
+ *                 token:
+ *                   type: string
+ *       400:
+ *         description: Validation error or user already exists
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+router.post('/register', validateRegister, async (req: Request, res: Response) => {
+  try {
+    const { email, password, firstName, lastName, phone, avatar, position } = req.body;
+
+    // Check if user already exists
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      res.status(400).json({
+        error: 'User already exists',
+        code: 'USER_EXISTS',
+      });
+      return;
+    }
+
+    // Hash password
+    const hashedPassword = await hashPassword(password);
+
+    // Create user
+    const user = new User({
+      email,
+      password: hashedPassword,
+      profile: {
+        firstName,
+        lastName,
+        phone,
+        avatar,
+        position,
+      },
+    });
+
+    await user.save();
+
+    // Generate token
+    const token = generateToken({
+      userId: user._id.toString(),
+      email: user.email,
+    });
+
+    // Return user without password
+    const userObj = user.toObject();
+    delete (userObj as any).password;
+
+    res.status(201).json({
+      user: userObj,
+      token,
+    });
+  } catch (error: any) {
+    if (error.code === 11000) {
+      res.status(400).json({
+        error: 'Email already exists',
+        code: 'DUPLICATE_EMAIL',
+      });
+      return;
+    }
+    throw error;
+  }
+});
+
+/**
+ * @swagger
+ * /api/auth/login:
+ *   post:
+ *     summary: Login user
+ *     tags: [Authentication]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - password
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *               password:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Login successful
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 user:
+ *                   $ref: '#/components/schemas/User'
+ *                 token:
+ *                   type: string
+ *       401:
+ *         description: Invalid credentials
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+router.post('/login', validateLogin, async (req: Request, res: Response) => {
+  try {
+    const { email, password } = req.body;
+
+    // Find user with password
+    const user = await User.findOne({ email }).select('+password');
+    if (!user) {
+      res.status(401).json({
+        error: 'Invalid credentials',
+        code: 'INVALID_CREDENTIALS',
+      });
+      return;
+    }
+
+    // Check password
+    const isPasswordValid = await comparePassword(password, user.password);
+    if (!isPasswordValid) {
+      res.status(401).json({
+        error: 'Invalid credentials',
+        code: 'INVALID_CREDENTIALS',
+      });
+      return;
+    }
+
+    // Generate token
+    const token = generateToken({
+      userId: user._id.toString(),
+      email: user.email,
+    });
+
+    // Return user without password
+    const userObj = user.toObject();
+    delete (userObj as any).password;
+
+    res.json({
+      user: userObj,
+      token,
+    });
+  } catch (error) {
+    throw error;
+  }
+});
+
+/**
+ * @swagger
+ * /api/auth/forgot-password:
+ *   post:
+ *     summary: Request password reset
+ *     tags: [Authentication]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *     responses:
+ *       200:
+ *         description: Password reset email sent (if user exists)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ */
+router.post('/forgot-password', async (req: Request, res: Response) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      res.status(400).json({
+        error: 'Email is required',
+        code: 'MISSING_EMAIL',
+      });
+      return;
+    }
+
+    const user = await User.findOne({ email });
+    if (!user) {
+      // Don't reveal if user exists for security
+      res.json({
+        message: 'If the email exists, a password reset link has been sent',
+      });
+      return;
+    }
+
+    // TODO: Implement email service to send reset token
+    // For now, just return success message
+    res.json({
+      message: 'If the email exists, a password reset link has been sent',
+    });
+  } catch (error) {
+    throw error;
+  }
+});
+
+/**
+ * @swagger
+ * /api/auth/reset-password:
+ *   post:
+ *     summary: Reset password with token
+ *     tags: [Authentication]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - token
+ *               - newPassword
+ *             properties:
+ *               token:
+ *                 type: string
+ *               newPassword:
+ *                 type: string
+ *                 minLength: 6
+ *     responses:
+ *       200:
+ *         description: Password reset successful
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ */
+router.post('/reset-password', async (req: Request, res: Response) => {
+  try {
+    const { token, newPassword } = req.body;
+
+    if (!token || !newPassword) {
+      res.status(400).json({
+        error: 'Token and new password are required',
+        code: 'MISSING_FIELDS',
+      });
+      return;
+    }
+
+    if (newPassword.length < 6) {
+      res.status(400).json({
+        error: 'Password must be at least 6 characters',
+        code: 'WEAK_PASSWORD',
+      });
+      return;
+    }
+
+    // TODO: Verify reset token and update password
+    // For now, return success message
+    res.json({
+      message: 'Password reset functionality will be implemented with email service',
+    });
+  } catch (error) {
+    throw error;
+  }
+});
+
+/**
+ * @swagger
+ * /api/auth/logout:
+ *   post:
+ *     summary: Logout user
+ *     tags: [Authentication]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Logout successful
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ */
+router.post('/logout', authenticate, async (req: Request, res: Response) => {
+  // In a stateless JWT system, logout is handled client-side
+  // If you need server-side logout, implement token blacklisting
+  res.json({
+    message: 'Logged out successfully',
+  });
+});
+
+/**
+ * @swagger
+ * /api/auth/me:
+ *   get:
+ *     summary: Get current authenticated user
+ *     tags: [Authentication]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Current user information
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 user:
+ *                   $ref: '#/components/schemas/User'
+ *       401:
+ *         description: Unauthorized
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+router.get('/me', authenticate, async (req: Request, res: Response) => {
+  try {
+    const user = await User.findById(req.user!._id);
+    if (!user) {
+      res.status(404).json({
+        error: 'User not found',
+        code: 'USER_NOT_FOUND',
+      });
+      return;
+    }
+
+    const userObj = user.toObject();
+    delete (userObj as any).password;
+
+    res.json({
+      user: userObj,
+    });
+  } catch (error) {
+    throw error;
+  }
+});
+
+/**
+ * @swagger
+ * /api/auth/profile:
+ *   put:
+ *     summary: Update current user's profile
+ *     tags: [Authentication]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               firstName:
+ *                 type: string
+ *               lastName:
+ *                 type: string
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 description: Must end with @ukbonn.de if provided
+ *               phone:
+ *                 type: string
+ *               position:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Profile updated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 user:
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: string
+ *                     firstName:
+ *                       type: string
+ *                     lastName:
+ *                       type: string
+ *                     email:
+ *                       type: string
+ *                     role:
+ *                       type: string
+ *                 token:
+ *                   type: string
+ *                   description: Updated token (optional, only if email changed)
+ *       400:
+ *         description: Validation error
+ *       401:
+ *         description: Unauthorized
+ */
+router.put('/profile', authenticate, async (req: Request, res: Response) => {
+  try {
+    const { firstName, lastName, email, phone, position } = req.body;
+
+    const user = await User.findById(req.user!._id);
+    if (!user) {
+      res.status(404).json({
+        error: 'User not found',
+        code: 'USER_NOT_FOUND',
+      });
+      return;
+    }
+
+    let token: string | undefined;
+    let emailChanged = false;
+
+    // Update email if provided and different
+    if (email && email !== user.email) {
+      // Validate email format and domain
+      if (!email.endsWith('@ukbonn.de')) {
+        res.status(400).json({
+          error: 'Email must end with @ukbonn.de',
+          code: 'INVALID_EMAIL_DOMAIN',
+        });
+        return;
+      }
+
+      // Check if email is already taken
+      const existingUser = await User.findOne({ email });
+      if (existingUser && existingUser._id.toString() !== user._id.toString()) {
+        res.status(400).json({
+          error: 'Email already exists',
+          code: 'DUPLICATE_EMAIL',
+        });
+        return;
+      }
+
+      user.email = email;
+      emailChanged = true;
+    }
+
+    // Update profile fields
+    // Ensure profile object exists
+    if (!user.profile) {
+      user.profile = {
+        firstName: '',
+        lastName: '',
+      };
+    }
+
+    // Update profile fields - handle empty strings properly
+    if (firstName !== undefined) {
+      user.set('profile.firstName', firstName);
+    }
+    if (lastName !== undefined) {
+      user.set('profile.lastName', lastName);
+    }
+    if (phone !== undefined) {
+      // Allow empty string to clear the field
+      user.set('profile.phone', phone === '' ? undefined : phone);
+    }
+    if (position !== undefined) {
+      // Allow empty string to clear the field, otherwise set the value
+      user.set('profile.position', position === '' ? undefined : position);
+    }
+
+    await user.save();
+
+    // Generate new token if email changed
+    if (emailChanged) {
+      token = generateToken({
+        userId: user._id.toString(),
+        email: user.email,
+      });
+    }
+
+    // Reload user to get fresh data after save
+    const updatedUser = await User.findById(user._id);
+    if (!updatedUser) {
+      res.status(404).json({
+        error: 'User not found after update',
+        code: 'USER_NOT_FOUND',
+      });
+      return;
+    }
+
+    const userObj = updatedUser.toObject() as any;
+    delete userObj.password;
+
+    // Format response to match frontend expectations
+    const response: any = {
+      user: {
+        id: userObj._id.toString(),
+        firstName: (userObj.profile && userObj.profile.firstName) || '',
+        lastName: (userObj.profile && userObj.profile.lastName) || '',
+        email: userObj.email,
+        phone: (userObj.profile && userObj.profile.phone) || '',
+        position: (userObj.profile && userObj.profile.position) || '',
+        role: 'user', // You can add role field to User model if needed
+      },
+    };
+
+    // Only include token if it was regenerated
+    if (token) {
+      response.token = token;
+    }
+
+    res.json(response);
+  } catch (error: any) {
+    if (error.code === 11000) {
+      res.status(400).json({
+        error: 'Email already exists',
+        code: 'DUPLICATE_EMAIL',
+      });
+      return;
+    }
+    throw error;
+  }
+});
+
+export default router;
+

@@ -1,0 +1,93 @@
+import mongoose, { Schema, Document } from 'mongoose';
+import { QuestionType, Answer } from '../types';
+
+export interface IResponse extends Document {
+  userId: mongoose.Types.ObjectId;
+  answers: Answer[];
+  signatureBase64?: string;
+  draft: boolean;
+  completedAt?: Date;
+  createdAt: Date;
+  updatedAt: Date;
+  intervieweeName?: string;
+  intervieweeEmail?: string;
+  intervieweePhone?: string;
+}
+
+const AnswerSchema = new Schema({
+  questionId: { type: String, required: true },
+  type: {
+    type: String,
+    enum: ['SINGLE_CHOICE', 'MULTIPLE_CHOICE', 'TEXT', 'NUMBER', 'RATING', 'DATE', 'IMAGE_UPLOAD', 'FILE_UPLOAD', 'GEOLOCATION', 'SIGNATURE'],
+    required: true,
+  },
+  value: {
+    type: Schema.Types.Mixed,
+    // Note: We validate value presence in the route handler for better error messages
+    // Schema-level validation is complex due to conditional requirements for file types
+  },
+  imageUri: String,
+  fileUri: String,
+  signatureBase64: String,
+}, { _id: false });
+
+const ResponseSchema = new Schema<IResponse>(
+  {
+    userId: {
+      type: Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+    },
+    answers: {
+      type: [AnswerSchema],
+      default: [],
+    },
+    signatureBase64: {
+      type: String,
+    },
+    draft: {
+      type: Boolean,
+      default: true,
+    },
+    completedAt: {
+      type: Date,
+    },
+    intervieweeName: {
+      type: String,
+      trim: true,
+    },
+    intervieweeEmail: {
+      type: String,
+      trim: true,
+      lowercase: true,
+      validate: {
+        validator: function(v: string) {
+          // Allow empty/undefined (field is optional)
+          if (!v || v === '') return true;
+          // Validate email format if provided
+          const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+          return emailRegex.test(v);
+        },
+        message: 'Please provide a valid email address',
+      },
+    },
+    intervieweePhone: {
+      type: String,
+      trim: true,
+    },
+  },
+  {
+    timestamps: true,
+  }
+);
+
+// Indexes
+ResponseSchema.index({ userId: 1 });
+ResponseSchema.index({ draft: 1 });
+ResponseSchema.index({ completedAt: -1 });
+ResponseSchema.index({ createdAt: -1 });
+ResponseSchema.index({ intervieweeName: 1 });
+ResponseSchema.index({ intervieweeEmail: 1 });
+
+export const Response = mongoose.model<IResponse>('Response', ResponseSchema);
+
