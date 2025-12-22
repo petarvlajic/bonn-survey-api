@@ -5,6 +5,7 @@ import dotenv from 'dotenv';
 import swaggerUi from 'swagger-ui-express';
 import { connectDatabase } from './config/database';
 import { errorHandler } from './middleware/errorHandler';
+import { logger, detailedLogger } from './middleware/logger';
 import { swaggerSpec } from './config/swagger';
 
 // Routes
@@ -41,6 +42,7 @@ const limiter = rateLimit({
 app.use(cors(corsOptions));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(logger); // Logger middleware - logs all requests
 app.use('/api/', limiter);
 
 // Swagger UI
@@ -74,7 +76,7 @@ app.get('/', (req: Request, res: Response) => {
   });
 });
 
-app.get('/health', (req: Request, res: Response) => {
+app.get('/health', detailedLogger, (req: Request, res: Response) => {
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
