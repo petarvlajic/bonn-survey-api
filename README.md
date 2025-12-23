@@ -42,6 +42,7 @@ cp .env.example .env
 - Set `MONGODB_URI` to your MongoDB connection string
 - Set `JWT_SECRET` to a secure random string
 - Configure `CORS_ORIGIN` for your frontend domain
+- Configure email settings (SMTP) for sending survey PDFs (optional but recommended)
 
 ## Running the Application
 
@@ -198,6 +199,55 @@ Supported question types:
 - Survey reference
 - User reference
 - Partial response data
+
+## Email Configuration
+
+The API automatically sends a PDF copy of completed surveys to the interviewee's email address. To enable this feature, configure SMTP settings in your `.env` file:
+
+```env
+# SMTP Configuration
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_USER=your-email@gmail.com
+SMTP_PASS=your-app-password
+SMTP_FROM=noreply@ukbonn.de
+```
+
+### Email Features
+
+- **Automatic PDF Delivery**: When a survey is completed (draft: false), a PDF is automatically generated and sent to the `intervieweeEmail` field
+- **Email Content**: Professional HTML email with survey details and PDF attachment
+- **Error Handling**: Email failures are logged but don't prevent survey completion
+
+### Supported SMTP Providers
+
+- Gmail (requires App Password)
+- Outlook/Office 365
+- Custom SMTP servers
+- Any SMTP-compatible email service
+
+### Testing Email
+
+For development, you can use services like:
+- [Ethereal Email](https://ethereal.email) - Generates test SMTP credentials
+- [Mailtrap](https://mailtrap.io) - Email testing service
+
+### PDF Storage
+
+PDF files are automatically saved to the `pdfs/` directory when surveys are completed. You can control this behavior with the `SAVE_PDF_TO_DISK` environment variable:
+
+```env
+# Save PDFs to disk (default: true)
+SAVE_PDF_TO_DISK=true
+```
+
+**PDF Storage Location:**
+- Directory: `./pdfs/` (in project root)
+- Filename format: `response-{responseId}-{timestamp}.pdf`
+- Example: `response-507f1f77bcf86cd799439011-1703001234567.pdf`
+
+**Note:** The `pdfs/` directory is automatically created if it doesn't exist. Make sure to add it to `.gitignore` to avoid committing PDF files to version control.
 
 ## Error Handling
 

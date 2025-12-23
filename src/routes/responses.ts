@@ -2,6 +2,8 @@ import express, { Request, Response } from 'express';
 import { Response as ResponseModel } from '../models/Response';
 import { authenticate } from '../middleware/auth';
 import PDFDocument from 'pdfkit';
+import { generateResponsePDF } from '../utils/pdfGenerator';
+import { sendSurveyCompletionEmail } from '../utils/email';
 
 const router = express.Router();
 
@@ -379,6 +381,24 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
       await response.save();
       await response.populate('userId', 'email profile.firstName profile.lastName');
 
+      // Send email with PDF if survey is completed (not draft) and interviewee email is provided
+      if (!finalDraft && response.intervieweeEmail) {
+        try {
+          // Save PDF to disk if enabled (default: true)
+          const savePDF = process.env.SAVE_PDF_TO_DISK !== 'false';
+          const pdfBuffer = await generateResponsePDF(response, savePDF);
+          await sendSurveyCompletionEmail(
+            response.intervieweeEmail,
+            response.intervieweeName,
+            pdfBuffer
+          );
+          console.log(`✅ Email sent to ${response.intervieweeEmail} for response ${response._id}`);
+        } catch (emailError: any) {
+          // Log error but don't fail the request
+          console.error(`❌ Failed to send email to ${response.intervieweeEmail}:`, emailError.message);
+        }
+      }
+
       res.status(201).json({
         message: finalDraft 
           ? 'Response saved as draft successfully' 
@@ -647,6 +667,24 @@ router.post('/:id/complete', authenticate, async (req: Request, res: Response) =
       await response.save();
       await response.populate('userId', 'email profile.firstName profile.lastName');
 
+      // Send email with PDF if interviewee email is provided
+      if (response.intervieweeEmail) {
+        try {
+          // Save PDF to disk if enabled (default: true)
+          const savePDF = process.env.SAVE_PDF_TO_DISK !== 'false';
+          const pdfBuffer = await generateResponsePDF(response, savePDF);
+          await sendSurveyCompletionEmail(
+            response.intervieweeEmail,
+            response.intervieweeName,
+            pdfBuffer
+          );
+          console.log(`✅ Email sent to ${response.intervieweeEmail} for response ${response._id}`);
+        } catch (emailError: any) {
+          // Log error but don't fail the request
+          console.error(`❌ Failed to send email to ${response.intervieweeEmail}:`, emailError.message);
+        }
+      }
+
       res.json({
         message: 'Response completed successfully',
         response,
@@ -826,82 +864,15 @@ router.get('/:id/export/pdf', authenticate, async (req: Request, res: Response) 
       return;
     }
 
-    // Generate PDF
-    const doc = new PDFDocument({ margin: 50 });
+    // Generate PDF using utility function
+    const pdfBuffer = await generateResponsePDF(response);
+    
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader(
       'Content-Disposition',
       `attachment; filename="response-${response._id}.pdf"`
     );
-    doc.pipe(res);
-
-    // Header
-    doc.fontSize(20).text('Survey Response', { align: 'center' });
-    doc.moveDown();
-
-    // Response details
-    doc.fontSize(14).text('Response Details', { underline: true });
-    doc.moveDown(0.5);
-    doc.fontSize(12);
-    doc.text(`ID: ${response._id}`);
-    doc.text(
-      `Interviewer: ${(response.userId as any)?.email || 'N/A'} ${
-        (response.userId as any)?.profile
-          ? `(${(response.userId as any).profile.firstName} ${(response.userId as any).profile.lastName})`
-          : ''
-      }`
-    );
-    doc.text(`Status: ${response.draft ? 'Draft' : 'Completed'}`);
-    doc.text(`Created At: ${response.createdAt.toLocaleString()}`);
-    if (response.completedAt) {
-      doc.text(`Completed At: ${response.completedAt.toLocaleString()}`);
-    }
-    doc.moveDown();
-
-    // Interviewee information
-    if (response.intervieweeName || response.intervieweeEmail || response.intervieweePhone) {
-      doc.fontSize(14).text('Interviewee Information', { underline: true });
-      doc.moveDown(0.5);
-      doc.fontSize(12);
-      if (response.intervieweeName) doc.text(`Name: ${response.intervieweeName}`);
-      if (response.intervieweeEmail) doc.text(`Email: ${response.intervieweeEmail}`);
-      if (response.intervieweePhone) doc.text(`Phone: ${response.intervieweePhone}`);
-      doc.moveDown();
-    }
-
-    // Answers
-    if (response.answers && response.answers.length > 0) {
-      doc.fontSize(14).text('Answers', { underline: true });
-      doc.moveDown(0.5);
-      doc.fontSize(12);
-
-      response.answers.forEach((answer, index) => {
-        doc.text(`Question ${index + 1}:`, { continued: false });
-        doc.text(`Type: ${answer.type}`);
-        doc.text(`Value: ${JSON.stringify(answer.value)}`);
-        if (answer.imageUri) doc.text(`Image: ${answer.imageUri}`);
-        if (answer.fileUri) doc.text(`File: ${answer.fileUri}`);
-        doc.moveDown(0.5);
-      });
-    }
-
-    // Signature
-    if (response.signatureBase64) {
-      doc.moveDown();
-      doc.fontSize(14).text('Signature', { underline: true });
-      doc.moveDown(0.5);
-      try {
-        const imageBuffer = Buffer.from(response.signatureBase64, 'base64');
-        doc.image(imageBuffer, {
-          fit: [400, 200],
-          align: 'center',
-        });
-      } catch (error) {
-        doc.text('Signature image could not be displayed');
-      }
-    }
-
-    doc.end();
+    res.send(pdfBuffer);
   } catch (error) {
     throw error;
   }
