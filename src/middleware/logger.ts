@@ -58,8 +58,8 @@ export const logger = (
       `${statusEmoji} [${logData.timestamp}] ${logData.method} ${logData.path} - ${statusCode} - ${responseTime}ms - IP: ${logData.ip}`
     );
 
-    // Call original end
-    originalEnd.call(this, chunk, encoding);
+    // Call original end and return the result
+    return originalEnd.call(this, chunk, encoding);
   };
 
   next();
@@ -110,7 +110,8 @@ export const detailedLogger = (
     );
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
-    originalEnd.call(this, chunk, encoding);
+    // Call original end and return the result
+    return originalEnd.call(this, chunk, encoding);
   };
 
   next();

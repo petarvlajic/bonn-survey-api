@@ -12,27 +12,26 @@ interface EmailOptions {
   }>;
 }
 
-// Create transporter based on environment variables
+// Create transporter based on environment variables (Strato: port 465 + SSL)
 const createTransporter = () => {
-  // If SMTP config is provided, use it
+  const port = parseInt(process.env.SMTP_PORT || '587', 10);
+  const useSecure = process.env.SMTP_SECURE === 'true' || port === 465;
+
   if (process.env.SMTP_HOST) {
     return nodemailer.createTransport({
       host: process.env.SMTP_HOST,
-      port: parseInt(process.env.SMTP_PORT || '587'),
-      secure: process.env.SMTP_SECURE === 'true', // true for 465, false for other ports
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-      },
+      port,
+      secure: useSecure,
+      auth: process.env.SMTP_USER && process.env.SMTP_PASS
+        ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
+        : undefined,
     });
   }
 
-  // Default: Use Gmail or other service with OAuth2
-  // For development, you can use Ethereal Email (https://ethereal.email)
   return nodemailer.createTransport({
     host: process.env.SMTP_HOST || 'smtp.gmail.com',
-    port: parseInt(process.env.SMTP_PORT || '587'),
-    secure: false,
+    port,
+    secure: useSecure,
     auth: {
       user: process.env.SMTP_USER,
       pass: process.env.SMTP_PASS,
@@ -160,4 +159,7 @@ export const sendSurveyCompletionEmail = async (
     ],
   });
 };
+
+
+
 
