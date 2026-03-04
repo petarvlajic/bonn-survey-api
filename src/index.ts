@@ -22,7 +22,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Trust proxy when behind nginx/reverse proxy (required for rate-limit + X-Forwarded-For)
-app.set('trust proxy', 1);
+app.set('trust proxy', true);
 
 // CORS configuration
 const corsOptions = {
