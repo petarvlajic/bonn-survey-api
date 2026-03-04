@@ -21,8 +21,8 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Trust proxy when behind nginx/reverse proxy (required for rate-limit + X-Forwarded-For)
-app.set('trust proxy', true);
+// Trust first proxy only (nginx); required for rate-limit + X-Forwarded-For. Use 1 not true to avoid ERR_ERL_PERMISSIVE_TRUST_PROXY.
+app.set('trust proxy', 1);
 
 // CORS configuration
 const corsOptions = {
