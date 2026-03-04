@@ -1,11 +1,14 @@
+import crypto from 'crypto';
 import express, { Request, Response } from 'express';
 import { User } from '../models/User';
 import { hashPassword, comparePassword } from '../utils/password';
 import { generateToken } from '../utils/jwt';
-import { validateRegister, validateLogin } from '../middleware/validation';
+import { validateRegister, validateLogin, validatePasswordStrength } from '../middleware/validation';
 import { authenticate } from '../middleware/auth';
+import { sendPasswordResetEmail } from '../utils/email';
 
 const router = express.Router();
+const RESET_TOKEN_EXPIRY_MS = 3600000; // 1 hour
 
 /**
  * @swagger
@@ -62,12 +65,15 @@ const router = express.Router();
  *               $ref: '#/components/schemas/Error'
  */
 router.post('/register', validateRegister, async (req: Request, res: Response) => {
+  console.log('[Auth] POST /register – request received');
   try {
     const { email, password, firstName, lastName, phone, avatar, position } = req.body;
+    console.log('[Auth] POST /register – email:', email, 'firstName:', firstName);
 
     // Check if user already exists
     const existingUser = await User.findOne({ email });
     if (existingUser) {
+      console.log('[Auth] POST /register – 400 User already exists:', email);
       res.status(400).json({
         error: 'User already exists',
         code: 'USER_EXISTS',
@@ -103,11 +109,13 @@ router.post('/register', validateRegister, async (req: Request, res: Response) =
     const userObj = user.toObject();
     delete (userObj as any).password;
 
+    console.log('[Auth] POST /register – 201 OK, user created:', email);
     res.status(201).json({
       user: userObj,
       token,
     });
   } catch (error: any) {
+    console.warn('[Auth] POST /register – error:', error?.message || error);
     if (error.code === 11000) {
       res.status(400).json({
         error: 'Email already exists',
@@ -160,12 +168,15 @@ router.post('/register', validateRegister, async (req: Request, res: Response) =
  *               $ref: '#/components/schemas/Error'
  */
 router.post('/login', validateLogin, async (req: Request, res: Response) => {
+  console.log('[Auth] POST /login – request received');
   try {
     const { email, password } = req.body;
+    console.log('[Auth] POST /login – email:', email);
 
     // Find user with password
     const user = await User.findOne({ email }).select('+password');
     if (!user) {
+      console.log('[Auth] POST /login – 401 user not found:', email);
       res.status(401).json({
         error: 'Invalid credentials',
         code: 'INVALID_CREDENTIALS',
@@ -176,6 +187,7 @@ router.post('/login', validateLogin, async (req: Request, res: Response) => {
     // Check password
     const isPasswordValid = await comparePassword(password, user.password);
     if (!isPasswordValid) {
+      console.log('[Auth] POST /login – 401 invalid password:', email);
       res.status(401).json({
         error: 'Invalid credentials',
         code: 'INVALID_CREDENTIALS',
@@ -183,6 +195,7 @@ router.post('/login', validateLogin, async (req: Request, res: Response) => {
       return;
     }
 
+    console.log('[Auth] POST /login – 200 OK:', email);
     // Generate token
     const token = generateToken({
       userId: user._id.toString(),
@@ -232,8 +245,10 @@ router.post('/login', validateLogin, async (req: Request, res: Response) => {
  *                   type: string
  */
 router.post('/forgot-password', async (req: Request, res: Response) => {
+  console.log('[Auth] POST /forgot-password – request received');
   try {
     const { email } = req.body;
+    console.log('[Auth] POST /forgot-password – email:', email || '(missing)');
 
     if (!email) {
       res.status(400).json({
@@ -243,20 +258,42 @@ router.post('/forgot-password', async (req: Request, res: Response) => {
       return;
     }
 
-    const user = await User.findOne({ email });
+    const user = await User.findOne({ email }).select('+passwordResetToken +passwordResetExpires');
     if (!user) {
-      // Don't reveal if user exists for security
       res.json({
         message: 'If the email exists, a password reset link has been sent',
       });
       return;
     }
 
-    // TODO: Implement email service to send reset token
-    // For now, just return success message
-    res.json({
+    const token = crypto.randomBytes(32).toString('hex');
+    (user as any).passwordResetToken = token;
+    (user as any).passwordResetExpires = new Date(Date.now() + RESET_TOKEN_EXPIRY_MS);
+    await user.save();
+
+    if (process.env.SMTP_USER && process.env.SMTP_PASS) {
+      try {
+        await sendPasswordResetEmail(email, token);
+        console.log('[Auth] POST /forgot-password – reset email sent to', email);
+      } catch (emailErr: any) {
+        console.error('[Auth] POST /forgot-password – failed to send email:', emailErr.message);
+        res.status(500).json({
+          error: 'Failed to send reset email. Please try again later.',
+          code: 'EMAIL_SEND_FAILED',
+        });
+        return;
+      }
+    } else {
+      console.warn('[Auth] POST /forgot-password – SMTP not configured, reset email not sent');
+    }
+
+    const payload: { message: string; resetToken?: string } = {
       message: 'If the email exists, a password reset link has been sent',
-    });
+    };
+    if (process.env.NODE_ENV !== 'production' && !process.env.SMTP_USER) {
+      payload.resetToken = token;
+    }
+    res.json(payload);
   } catch (error) {
     throw error;
   }
@@ -295,8 +332,10 @@ router.post('/forgot-password', async (req: Request, res: Response) => {
  *                   type: string
  */
 router.post('/reset-password', async (req: Request, res: Response) => {
+  console.log('[Auth] POST /reset-password – request received');
   try {
     const { token, newPassword } = req.body;
+    console.log('[Auth] POST /reset-password – token:', token ? 'present' : 'missing', 'newPassword:', newPassword ? 'present' : 'missing');
 
     if (!token || !newPassword) {
       res.status(400).json({
@@ -306,18 +345,40 @@ router.post('/reset-password', async (req: Request, res: Response) => {
       return;
     }
 
-    if (newPassword.length < 6) {
+    const passwordCheck = validatePasswordStrength(newPassword);
+    if (!passwordCheck.valid) {
       res.status(400).json({
-        error: 'Password must be at least 6 characters',
+        error: passwordCheck.error || 'Password must be at least 8 characters and contain uppercase, lowercase, number and special character',
         code: 'WEAK_PASSWORD',
       });
       return;
     }
 
-    // TODO: Verify reset token and update password
-    // For now, return success message
+    const user = await User.findOne({
+      passwordResetToken: token,
+      passwordResetExpires: { $gt: new Date() },
+    })
+      .select('+password +passwordResetToken +passwordResetExpires');
+
+    if (!user) {
+      res.status(400).json({
+        error: 'Invalid or expired reset token',
+        code: 'INVALID_TOKEN',
+      });
+      return;
+    }
+
+    const hashedPassword = await hashPassword(newPassword);
+    await User.updateOne(
+      { _id: user._id },
+      {
+        $set: { password: hashedPassword },
+        $unset: { passwordResetToken: 1, passwordResetExpires: 1 },
+      }
+    );
+
     res.json({
-      message: 'Password reset functionality will be implemented with email service',
+      message: 'Password has been reset successfully',
     });
   } catch (error) {
     throw error;

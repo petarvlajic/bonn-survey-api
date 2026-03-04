@@ -29,17 +29,19 @@ export const logger = (
     req.socket.remoteAddress ||
     'unknown';
 
-  // Log request start
+  const fullPath = req.originalUrl || req.path;
+
+  // Log request start (full URL so you see /api/auth/register etc.)
   const logData: RequestLog = {
     timestamp,
     method: req.method,
-    path: req.path,
+    path: fullPath,
     ip: clientIp,
     userAgent: req.headers['user-agent'],
   };
 
   console.log(
-    `[${logData.timestamp}] ${logData.method} ${logData.path} - IP: ${logData.ip}`
+    `[API] >>> ${logData.method} ${fullPath} (IP: ${logData.ip})`
   );
 
   // Override res.end to capture response details
@@ -55,7 +57,7 @@ export const logger = (
     const statusEmoji =
       statusCode >= 500 ? '❌' : statusCode >= 400 ? '⚠️' : '✅';
     console.log(
-      `${statusEmoji} [${logData.timestamp}] ${logData.method} ${logData.path} - ${statusCode} - ${responseTime}ms - IP: ${logData.ip}`
+      `[API] <<< ${statusEmoji} ${logData.method} ${fullPath} ${statusCode} ${responseTime}ms`
     );
 
     // Call original end and return the result

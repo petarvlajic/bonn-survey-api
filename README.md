@@ -214,9 +214,23 @@ SMTP_PASS=your-app-password
 SMTP_FROM=noreply@ukbonn.de
 ```
 
+### Password reset email
+
+When a user requests a password reset (`POST /api/auth/forgot-password`), the API sends an email with a reset link if SMTP is configured. Set the base URL of your app so the link points to the reset page:
+
+```env
+# URL where users open the reset link (web or app). Link will be: {RESET_PASSWORD_BASE_URL}/reset-password?token=...
+RESET_PASSWORD_BASE_URL=https://survey.herz-check-bonn.de
+# Or use FRONTEND_URL for the same purpose
+# FRONTEND_URL=https://survey.herz-check-bonn.de
+```
+
+Without this, the email is still sent but the link may be missing or wrong. Reset tokens expire after 1 hour.
+
 ### Email Features
 
 - **Automatic PDF Delivery**: When a survey is completed (draft: false), a PDF is automatically generated and sent to the `intervieweeEmail` field
+- **Password reset**: Forgot-password sends an email with a reset link when SMTP is configured
 - **Email Content**: Professional HTML email with survey details and PDF attachment
 - **Error Handling**: Email failures are logged but don't prevent survey completion
 

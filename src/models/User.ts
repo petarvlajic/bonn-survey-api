@@ -10,6 +10,8 @@ export interface IUser extends Document {
     avatar?: string;
     position?: string;
   };
+  passwordResetToken?: string;
+  passwordResetExpires?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -54,6 +56,14 @@ const UserSchema = new Schema<IUser>(
         type: String,
         trim: true,
       },
+    },
+    passwordResetToken: {
+      type: String,
+      select: false,
+    },
+    passwordResetExpires: {
+      type: Date,
+      select: false,
     },
   },
   {
