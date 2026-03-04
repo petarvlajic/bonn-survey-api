@@ -44,6 +44,7 @@ const createTransporter = () => {
  */
 export const sendEmail = async (options: EmailOptions): Promise<void> => {
   try {
+    console.log(`[API] [email] Connecting to SMTP (${process.env.SMTP_HOST}:${process.env.SMTP_PORT}) and sending to ${options.to}...`);
     const transporter = createTransporter();
 
     const mailOptions = {

@@ -384,21 +384,26 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
       // Send email with PDF if survey is completed (not draft) and interviewee email is provided
       if (!finalDraft && response.intervieweeEmail) {
         try {
-          // Save PDF to disk if enabled (default: true)
           const savePDF = process.env.SAVE_PDF_TO_DISK !== 'false';
+          console.log(`[API] Generating PDF for response ${response._id} (saveToDisk=${savePDF})...`);
           const pdfBuffer = await generateResponsePDF(response, savePDF);
+          console.log(`[API] PDF generated, size=${pdfBuffer.length} bytes. Sending email to ${response.intervieweeEmail}...`);
           await sendSurveyCompletionEmail(
             response.intervieweeEmail,
             response.intervieweeName,
             pdfBuffer
           );
-          console.log(`✅ Email sent to ${response.intervieweeEmail} for response ${response._id}`);
+          console.log(`[API] ✅ Email sent to ${response.intervieweeEmail} for response ${response._id}`);
         } catch (emailError: any) {
-          // Log error but don't fail the request
-          console.error(`❌ Failed to send email to ${response.intervieweeEmail}:`, emailError.message);
+          console.error(`[API] ❌ Failed to send email to ${response.intervieweeEmail}:`, emailError.message);
+          console.log(`[API] Request will still return 201 (email is optional).`);
         }
+      } else {
+        if (finalDraft) console.log(`[API] Skip email: response is draft.`);
+        else if (!response.intervieweeEmail) console.log(`[API] Skip email: no intervieweeEmail.`);
       }
 
+      console.log(`[API] Sending 201 response to client for response ${response._id}`);
       res.status(201).json({
         message: finalDraft 
           ? 'Response saved as draft successfully' 
@@ -670,21 +675,25 @@ router.post('/:id/complete', authenticate, async (req: Request, res: Response) =
       // Send email with PDF if interviewee email is provided
       if (response.intervieweeEmail) {
         try {
-          // Save PDF to disk if enabled (default: true)
           const savePDF = process.env.SAVE_PDF_TO_DISK !== 'false';
+          console.log(`[API] [complete] Generating PDF for response ${response._id} (saveToDisk=${savePDF})...`);
           const pdfBuffer = await generateResponsePDF(response, savePDF);
+          console.log(`[API] [complete] PDF generated, size=${pdfBuffer.length} bytes. Sending email to ${response.intervieweeEmail}...`);
           await sendSurveyCompletionEmail(
             response.intervieweeEmail,
             response.intervieweeName,
             pdfBuffer
           );
-          console.log(`✅ Email sent to ${response.intervieweeEmail} for response ${response._id}`);
+          console.log(`[API] [complete] ✅ Email sent to ${response.intervieweeEmail} for response ${response._id}`);
         } catch (emailError: any) {
-          // Log error but don't fail the request
-          console.error(`❌ Failed to send email to ${response.intervieweeEmail}:`, emailError.message);
+          console.error(`[API] [complete] ❌ Failed to send email to ${response.intervieweeEmail}:`, emailError.message);
+          console.log(`[API] [complete] Request will still return 200 (email is optional).`);
         }
+      } else {
+        console.log(`[API] [complete] Skip email: no intervieweeEmail.`);
       }
 
+      console.log(`[API] [complete] Sending 200 response to client for response ${response._id}`);
       res.json({
         message: 'Response completed successfully',
         response,
