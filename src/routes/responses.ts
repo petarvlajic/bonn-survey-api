@@ -3,7 +3,7 @@ import { Response as ResponseModel } from '../models/Response';
 import { authenticate } from '../middleware/auth';
 import PDFDocument from 'pdfkit';
 import { generateResponsePDF } from '../utils/pdfGenerator';
-import { sendSurveyCompletionEmail } from '../utils/email';
+import { sendConsentEmailWithPdf, sendSurveyCompletionEmail } from '../utils/email';
 
 const router = express.Router();
 
@@ -239,6 +239,9 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
     const {
       answers,
       answer, // Support both plural and singular
+      pid,
+      birthDate,
+      consentPdfBase64,
       signatureBase64,
       signature, // Support both signatureBase64 and signature
       draft,
@@ -368,6 +371,8 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
 
     const response = new ResponseModel({
       userId: req.user!._id,
+      pid,
+      birthDate,
       answers: transformedAnswers,
       signatureBase64: finalSignatureBase64,
       draft: finalDraft,
@@ -381,26 +386,63 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
       await response.save();
       await response.populate('userId', 'email profile.firstName profile.lastName');
 
-      // Send email with PDF if survey is completed (not draft) and interviewee email is provided
+      // Send email with survey response PDF if survey is completed (not draft) and interviewee email is provided
       if (!finalDraft && response.intervieweeEmail) {
         try {
           const savePDF = process.env.SAVE_PDF_TO_DISK !== 'false';
-          console.log(`[API] Generating PDF for response ${response._id} (saveToDisk=${savePDF})...`);
+          console.log(
+            `[API] Generating PDF for response ${response._id} (saveToDisk=${savePDF})...`
+          );
           const pdfBuffer = await generateResponsePDF(response, savePDF);
-          console.log(`[API] PDF generated, size=${pdfBuffer.length} bytes. Sending email to ${response.intervieweeEmail}...`);
+          console.log(
+            `[API] PDF generated, size=${pdfBuffer.length} bytes. Sending email to ${response.intervieweeEmail}...`
+          );
           await sendSurveyCompletionEmail(
             response.intervieweeEmail,
             response.intervieweeName,
             pdfBuffer
           );
-          console.log(`[API] ✅ Email sent to ${response.intervieweeEmail} for response ${response._id}`);
+          console.log(
+            `[API] ✅ Email sent to ${response.intervieweeEmail} for response ${response._id}`
+          );
         } catch (emailError: any) {
-          console.error(`[API] ❌ Failed to send email to ${response.intervieweeEmail}:`, emailError.message);
+          console.error(
+            `[API] ❌ Failed to send email to ${response.intervieweeEmail}:`,
+            emailError.message
+          );
           console.log(`[API] Request will still return 201 (email is optional).`);
         }
       } else {
         if (finalDraft) console.log(`[API] Skip email: response is draft.`);
-        else if (!response.intervieweeEmail) console.log(`[API] Skip email: no intervieweeEmail.`);
+        else if (!response.intervieweeEmail)
+          console.log(`[API] Skip email: no intervieweeEmail.`);
+      }
+
+      // Send consent PDF email if client provided consentPdfBase64 (signed Datenschutzerklärung)
+      if (!finalDraft && response.intervieweeEmail && consentPdfBase64) {
+        try {
+          const base64Part = consentPdfBase64.includes(',')
+            ? consentPdfBase64.split(',')[1]
+            : consentPdfBase64;
+          const consentBuffer = Buffer.from(base64Part, 'base64');
+          console.log(
+            `[API] Sending consent PDF email to ${response.intervieweeEmail} for response ${response._id}...`
+          );
+          await sendConsentEmailWithPdf(
+            response.intervieweeEmail,
+            response.intervieweeName,
+            response.birthDate,
+            consentBuffer
+          );
+          console.log(
+            `[API] ✅ Consent email sent to ${response.intervieweeEmail} for response ${response._id}`
+          );
+        } catch (consentError: any) {
+          console.error(
+            `[API] ❌ Failed to send consent email to ${response.intervieweeEmail}:`,
+            consentError.message
+          );
+        }
       }
 
       console.log(`[API] Sending 201 response to client for response ${response._id}`);

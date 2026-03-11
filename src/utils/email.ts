@@ -63,6 +63,30 @@ export const sendEmail = async (options: EmailOptions): Promise<void> => {
 };
 
 /**
+ * Build PDF password based on interviewee name and birth date.
+ * Pattern: initials (first + last name) + birth year, e.g. "MM1985".
+ */
+const buildConsentPdfPassword = (
+  intervieweeName?: string,
+  birthDate?: string
+): string | null => {
+  if (!intervieweeName || !intervieweeName.trim()) return null;
+
+  const parts = intervieweeName.trim().split(/\s+/);
+  const first = parts[0]?.[0]?.toUpperCase() ?? '';
+  const last = (parts.length > 1 ? parts[parts.length - 1]?.[0] : '')?.toUpperCase() ?? '';
+  const initials = `${first}${last}`.trim();
+
+  if (!initials) return null;
+
+  if (!birthDate) return null;
+  const year = birthDate.split('-')[0];
+  if (!/^\d{4}$/.test(year)) return null;
+
+  return `${initials}${year}`;
+};
+
+/**
  * Send survey completion email with PDF attachment
  */
 export const sendSurveyCompletionEmail = async (
@@ -152,6 +176,82 @@ export const sendSurveyCompletionEmail = async (
     attachments: [
       {
         filename: `survey-response-${new Date().toISOString().split('T')[0]}.pdf`,
+        content: pdfBuffer,
+        contentType: 'application/pdf',
+      },
+    ],
+  });
+};
+
+/**
+ * Send consent PDF email (Datenschutzerklärung / Einwilligung) with optional password hint.
+ * The PDF itself is currently sent as provided; the password pattern is documented in the email.
+ */
+export const sendConsentEmailWithPdf = async (
+  recipientEmail: string,
+  recipientName: string | undefined,
+  birthDate: string | undefined,
+  pdfBuffer: Buffer
+): Promise<void> => {
+  const password = buildConsentPdfPassword(recipientName, birthDate);
+
+  const subject = 'Herz Check Bonn – Einwilligung (Consent PDF)';
+
+  const passwordLine = password
+    ? `Šifra za otključavanje PDF-a (pattern: inicijali + godina rođenja) je: ${password} (npr. MM1985).`
+    : 'Šifra za otključavanje PDF-a prati pattern: inicijali + godina rođenja (npr. MM1985).';
+
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+        .header { background-color: #1976d2; color: white; padding: 16px; text-align: center; border-radius: 5px 5px 0 0; }
+        .content { background-color: #f9f9f9; padding: 20px; border-radius: 0 0 5px 5px; }
+        .footer { text-align: center; margin-top: 20px; color: #666; font-size: 12px; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="header">
+          <h1>Einwilligung – Herz Check Bonn</h1>
+        </div>
+        <div class="content">
+          <p>Sehr geehrte/r ${recipientName || 'Teilnehmer/in'},</p>
+          <p>im Anhang finden Sie das Dokument „Datenschutzerklärung und Einwilligungserklärung – Herz Check Bonn“ als PDF.</p>
+          <p>${passwordLine}</p>
+          <p>Mit freundlichen Grüßen<br/>Herz Check Bonn Team</p>
+        </div>
+        <div class="footer">
+          <p>Dies ist eine automatisierte E-Mail. Bitte antworten Sie nicht auf diese Nachricht.</p>
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+
+  const text = `
+Sehr geehrte/r ${recipientName || 'Teilnehmer/in'},
+
+im Anhang finden Sie das Dokument „Datenschutzerklärung und Einwilligungserklärung – Herz Check Bonn“ als PDF.
+
+${passwordLine}
+
+Mit freundlichen Grüßen
+Herz Check Bonn Team
+`.trim();
+
+  await sendEmail({
+    to: recipientEmail,
+    subject,
+    text,
+    html,
+    attachments: [
+      {
+        filename: `einwilligung-herz-check-bonn-${new Date().toISOString().split('T')[0]}.pdf`,
         content: pdfBuffer,
         contentType: 'application/pdf',
       },
