@@ -1,5 +1,4 @@
 import nodemailer from 'nodemailer';
-import { Resend } from 'resend';
 
 interface EmailOptions {
   to: string;
@@ -12,8 +11,6 @@ interface EmailOptions {
     contentType?: string;
   }>;
 }
-
-const useResend = (): boolean => !!process.env.RESEND_API_KEY;
 
 // Create transporter based on environment variables (Strato: port 465 + SSL)
 const createTransporter = () => {
@@ -43,33 +40,10 @@ const createTransporter = () => {
 };
 
 /**
- * Send email with optional PDF attachment.
- * Uses Resend API (HTTPS, port 443) when RESEND_API_KEY is set; otherwise SMTP.
+ * Send email with optional PDF attachment (SMTP).
  */
 export const sendEmail = async (options: EmailOptions): Promise<void> => {
   try {
-    if (useResend()) {
-      const from = process.env.RESEND_FROM || 'UK Bonn Survey <onboarding@resend.dev>';
-      console.log(`[API] [email] Sending via Resend API to ${options.to}...`);
-      const resend = new Resend(process.env.RESEND_API_KEY);
-      const res = await resend.emails.send({
-        from,
-        to: options.to,
-        subject: options.subject,
-        html: options.html ?? options.text ?? '',
-        text: options.text,
-        attachments: options.attachments?.map((a) => ({
-          filename: a.filename,
-          content: a.content,
-        })),
-      });
-      if (res.error) {
-        throw new Error(res.error.message || JSON.stringify(res.error));
-      }
-      console.log('✅ Email sent successfully (Resend):', res.data?.id);
-      return;
-    }
-
     console.log(`[API] [email] Connecting to SMTP (${process.env.SMTP_HOST}:${process.env.SMTP_PORT}) and sending to ${options.to}...`);
     const transporter = createTransporter();
     const mailOptions = {
