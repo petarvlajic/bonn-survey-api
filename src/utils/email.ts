@@ -1,4 +1,5 @@
 import nodemailer from 'nodemailer';
+import { encryptPdfBufferWithPassword } from './pdfEncrypt';
 
 interface EmailOptions {
   to: string;
@@ -195,6 +196,10 @@ export const sendConsentEmailWithPdf = async (
 ): Promise<void> => {
   const password = buildConsentPdfPassword(recipientName, birthDate);
 
+  // Try to encrypt PDF with password if possible; fall back to plain PDF on failure.
+  const pdfToSend =
+    password != null ? await encryptPdfBufferWithPassword(pdfBuffer, password) : pdfBuffer;
+
   const subject = 'Herz Check Bonn – Einwilligung (Consent PDF)';
 
   const passwordLine = password
@@ -252,7 +257,7 @@ Herz Check Bonn Team
     attachments: [
       {
         filename: `einwilligung-herz-check-bonn-${new Date().toISOString().split('T')[0]}.pdf`,
-        content: pdfBuffer,
+        content: pdfToSend,
         contentType: 'application/pdf',
       },
     ],
