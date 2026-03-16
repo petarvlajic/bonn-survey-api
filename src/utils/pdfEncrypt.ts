@@ -43,7 +43,12 @@ export const encryptPdfBufferWithPassword = async (
       });
 
       child.on('close', (code) => {
-        if (code === 0) {
+        // qpdf exit codes:
+        // 0 = success, 3 = success with warnings (output file still written).
+        if (code === 0 || code === 3) {
+          if (code === 3) {
+            console.warn('[PDF] qpdf reported warnings during encryption:', stderr.trim());
+          }
           resolve();
         } else {
           reject(new Error(`qpdf exited with code ${code}: ${stderr}`));
