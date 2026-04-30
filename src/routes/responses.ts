@@ -4,8 +4,24 @@ import { authenticate } from '../middleware/auth';
 import PDFDocument from 'pdfkit';
 import { generateResponsePDF } from '../utils/pdfGenerator';
 import { sendConsentEmailWithPdf, sendSurveyCompletionEmail } from '../utils/email';
+import { generatePid } from '../utils/pid';
+import { buildResponseCsv } from '../utils/responseExport';
+import { buildFieldChanges, verifyPostClosePin } from '../utils/audit';
 
 const router = express.Router();
+const TRACKED_UPDATE_FIELDS = [
+  'answers',
+  'signatureBase64',
+  'draft',
+  'completedAt',
+  'intervieweeName',
+  'intervieweeEmail',
+  'intervieweePhone',
+  'pid',
+  'birthDate',
+] as const;
+
+const shouldSendSurveyCompletionEmail = process.env.SEND_SURVEY_COMPLETION_EMAIL === 'true';
 
 /**
  * @swagger
@@ -80,6 +96,9 @@ router.get('/', authenticate, async (req: Request, res: Response) => {
     const {
       userId,
       draft,
+      workflowStatus,
+      pid,
+      search,
       completedAtFrom,
       completedAtTo,
       page = '1',
@@ -97,6 +116,23 @@ router.get('/', authenticate, async (req: Request, res: Response) => {
 
     if (draft !== undefined) {
       filter.draft = draft === 'true';
+    }
+    if (workflowStatus) {
+      filter.workflowStatus = workflowStatus;
+    }
+    if (pid) {
+      filter.pid = pid;
+    }
+    if (search) {
+      const regex = new RegExp(String(search), 'i');
+      filter.$or = [
+        { intervieweeName: regex },
+        { intervieweeEmail: regex },
+        { intervieweePhone: regex },
+        { pid: regex },
+        { 'answers.value': regex },
+        { 'answers.questionId': regex },
+      ];
     }
 
     if (completedAtFrom || completedAtTo) {
@@ -119,6 +155,7 @@ router.get('/', authenticate, async (req: Request, res: Response) => {
     const [responses, total] = await Promise.all([
       ResponseModel.find(filter)
         .populate('userId', 'email profile.firstName profile.lastName')
+        .populate('lockedBy', 'email profile.firstName profile.lastName')
         .sort(sort)
         .skip(skip)
         .limit(limitNum),
@@ -337,6 +374,32 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
 
     // Validate that answers have values
     if (transformedAnswers && transformedAnswers.length > 0) {
+      const imageUploadAnswers = transformedAnswers.filter(
+        (a: any) => a.type === 'IMAGE_UPLOAD' && a.imageUri
+      );
+      if (imageUploadAnswers.length > 5) {
+        res.status(400).json({
+          error: 'Too many photos uploaded',
+          code: 'TOO_MANY_PHOTOS',
+          message: 'A maximum of 5 photos is allowed per response.',
+        });
+        return;
+      }
+      const oversizedPhoto = imageUploadAnswers.find((a: any) => {
+        const data = String(a.imageUri || '');
+        const base64 = data.includes(',') ? data.split(',')[1] : data;
+        const bytesApprox = Math.floor((base64.length * 3) / 4);
+        return bytesApprox > 5 * 1024 * 1024; // 5MB
+      });
+      if (oversizedPhoto) {
+        res.status(400).json({
+          error: 'Photo exceeds size limit',
+          code: 'PHOTO_TOO_LARGE',
+          message: 'Each photo must be 5MB or smaller.',
+        });
+        return;
+      }
+
       const answersWithoutValues = transformedAnswers.filter((answer: any) => {
         const hasValue = answer.value !== undefined && answer.value !== null && answer.value !== '';
         const hasImageUri = answer.imageUri != null;
@@ -369,14 +432,17 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
       }
     }
 
+    const effectivePid = pid || generatePid();
+
     const response = new ResponseModel({
       userId: req.user!._id,
-      pid,
+      pid: effectivePid,
       birthDate,
       answers: transformedAnswers,
       signatureBase64: finalSignatureBase64,
       draft: finalDraft,
       completedAt,
+      workflowStatus: finalDraft ? 'patient_in_progress' : 'patient_completed',
       intervieweeName,
       intervieweeEmail,
       intervieweePhone,
@@ -386,8 +452,8 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
       await response.save();
       await response.populate('userId', 'email profile.firstName profile.lastName');
 
-      // Send email with survey response PDF if survey is completed (not draft) and interviewee email is provided
-      if (!finalDraft && response.intervieweeEmail) {
+      // Optional survey-response email (disabled by default).
+      if (!finalDraft && response.intervieweeEmail && shouldSendSurveyCompletionEmail) {
         try {
           const savePDF = process.env.SAVE_PDF_TO_DISK !== 'false';
           console.log(
@@ -413,9 +479,10 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
           console.log(`[API] Request will still return 201 (email is optional).`);
         }
       } else {
-        if (finalDraft) console.log(`[API] Skip email: response is draft.`);
-        else if (!response.intervieweeEmail)
-          console.log(`[API] Skip email: no intervieweeEmail.`);
+        if (finalDraft) console.log(`[API] Skip survey email: response is draft.`);
+        else if (!response.intervieweeEmail) console.log(`[API] Skip survey email: no intervieweeEmail.`);
+        else if (!shouldSendSurveyCompletionEmail)
+          console.log(`[API] Skip survey email: SEND_SURVEY_COMPLETION_EMAIL not enabled.`);
       }
 
       // Send consent PDF email if client provided consentPdfBase64 (signed Datenschutzerklärung)
@@ -506,13 +573,16 @@ router.put('/:id', authenticate, async (req: Request, res: Response) => {
       return;
     }
 
-    // Check if user owns the response
-    if (response.userId.toString() !== req.user!._id) {
+    // Allow owner edits or SHK edit while holding lock
+    const currentUserId = req.user!._id;
+    const isOwner = response.userId.toString() === currentUserId;
+    const hasShkLock = !!response.lockedBy && response.lockedBy.toString() === currentUserId;
+    if (!isOwner && !hasShkLock) {
       res.status(403).json({
         error: 'Access denied',
         code: 'FORBIDDEN',
-        message: 'You can only update your own responses.',
-        hint: 'Please use a response that belongs to your account.',
+        message: 'You can only update your own responses or locked SHK responses.',
+        hint: 'Lock the response first or use your own response.',
       });
       return;
     }
@@ -525,7 +595,28 @@ router.put('/:id', authenticate, async (req: Request, res: Response) => {
       intervieweeName,
       intervieweeEmail,
       intervieweePhone,
+      pid,
+      birthDate,
+      editPin,
+      changeReason,
     } = req.body;
+
+    if (response.workflowStatus === 'closed') {
+      if (!verifyPostClosePin(editPin)) {
+        res.status(403).json({
+          error: 'PIN required for editing a closed response',
+          code: 'PIN_REQUIRED',
+        });
+        return;
+      }
+      if (!changeReason || typeof changeReason !== 'string' || !changeReason.trim()) {
+        res.status(400).json({
+          error: 'changeReason is required for post-close edits',
+          code: 'CHANGE_REASON_REQUIRED',
+        });
+        return;
+      }
+    }
 
     // Validate email format if provided
     if (intervieweeEmail !== undefined && intervieweeEmail !== null && intervieweeEmail !== '') {
@@ -542,6 +633,7 @@ router.put('/:id', authenticate, async (req: Request, res: Response) => {
       }
     }
 
+    let parsedCompletedAt: Date | undefined;
     // Validate completedAt if provided
     if (completedAt !== undefined) {
       try {
@@ -555,7 +647,7 @@ router.put('/:id', authenticate, async (req: Request, res: Response) => {
           });
           return;
         }
-        response.completedAt = date;
+        parsedCompletedAt = date;
       } catch (dateError) {
         res.status(400).json({
           error: 'Invalid date format',
@@ -567,12 +659,54 @@ router.put('/:id', authenticate, async (req: Request, res: Response) => {
       }
     }
 
+    const beforeState = {
+      answers: response.answers,
+      signatureBase64: response.signatureBase64,
+      draft: response.draft,
+      completedAt: response.completedAt,
+      intervieweeName: response.intervieweeName,
+      intervieweeEmail: response.intervieweeEmail,
+      intervieweePhone: response.intervieweePhone,
+      pid: response.pid,
+      birthDate: response.birthDate,
+    };
+
     if (answers !== undefined) response.answers = answers;
     if (signatureBase64 !== undefined) response.signatureBase64 = signatureBase64;
     if (draft !== undefined) response.draft = draft;
+    if (parsedCompletedAt !== undefined) response.completedAt = parsedCompletedAt;
     if (intervieweeName !== undefined) response.intervieweeName = intervieweeName;
     if (intervieweeEmail !== undefined) response.intervieweeEmail = intervieweeEmail;
     if (intervieweePhone !== undefined) response.intervieweePhone = intervieweePhone;
+    if (pid !== undefined) response.pid = pid;
+    if (birthDate !== undefined) response.birthDate = birthDate;
+
+    const afterState = {
+      answers: response.answers,
+      signatureBase64: response.signatureBase64,
+      draft: response.draft,
+      completedAt: response.completedAt,
+      intervieweeName: response.intervieweeName,
+      intervieweeEmail: response.intervieweeEmail,
+      intervieweePhone: response.intervieweePhone,
+      pid: response.pid,
+      birthDate: response.birthDate,
+    };
+    const fieldChanges = buildFieldChanges(
+      beforeState as Record<string, unknown>,
+      afterState as Record<string, unknown>,
+      [...TRACKED_UPDATE_FIELDS]
+    );
+
+    if (fieldChanges.length > 0) {
+      response.changeLog.push({
+        changedBy: req.user!._id as any,
+        changedAt: new Date(),
+        source: response.workflowStatus === 'shk_in_progress' ? 'SHK' : 'PATIENT',
+        reason: changeReason,
+        changes: fieldChanges,
+      } as any);
+    }
 
     try {
       await response.save();
@@ -706,6 +840,7 @@ router.post('/:id/complete', authenticate, async (req: Request, res: Response) =
 
     response.draft = false;
     response.completedAt = new Date();
+    response.workflowStatus = 'patient_completed';
     if (signatureBase64 !== undefined) {
       response.signatureBase64 = signatureBase64;
     }
@@ -714,8 +849,8 @@ router.post('/:id/complete', authenticate, async (req: Request, res: Response) =
       await response.save();
       await response.populate('userId', 'email profile.firstName profile.lastName');
 
-      // Send email with PDF if interviewee email is provided
-      if (response.intervieweeEmail) {
+      // Optional survey-response email on /complete (disabled by default).
+      if (response.intervieweeEmail && shouldSendSurveyCompletionEmail) {
         try {
           const savePDF = process.env.SAVE_PDF_TO_DISK !== 'false';
           console.log(`[API] [complete] Generating PDF for response ${response._id} (saveToDisk=${savePDF})...`);
@@ -732,7 +867,9 @@ router.post('/:id/complete', authenticate, async (req: Request, res: Response) =
           console.log(`[API] [complete] Request will still return 200 (email is optional).`);
         }
       } else {
-        console.log(`[API] [complete] Skip email: no intervieweeEmail.`);
+        if (!response.intervieweeEmail) console.log(`[API] [complete] Skip survey email: no intervieweeEmail.`);
+        else if (!shouldSendSurveyCompletionEmail)
+          console.log(`[API] [complete] Skip survey email: SEND_SURVEY_COMPLETION_EMAIL not enabled.`);
       }
 
       console.log(`[API] [complete] Sending 200 response to client for response ${response._id}`);
@@ -764,6 +901,101 @@ router.post('/:id/complete', authenticate, async (req: Request, res: Response) =
   }
 });
 
+// Lock response for SHK editing
+router.post('/:id/lock', authenticate, async (req: Request, res: Response) => {
+  try {
+    const response = await ResponseModel.findById(req.params.id);
+    if (!response) {
+      res.status(404).json({ error: 'Response not found', code: 'RESPONSE_NOT_FOUND' });
+      return;
+    }
+
+    if (response.workflowStatus === 'closed') {
+      res.status(409).json({ error: 'Response is closed', code: 'RESPONSE_CLOSED' });
+      return;
+    }
+
+    const currentUserId = req.user!._id;
+    if (response.lockedBy && response.lockedBy.toString() !== currentUserId) {
+      res.status(409).json({
+        error: 'Response is currently locked by another SHK',
+        code: 'RESPONSE_LOCKED',
+      });
+      return;
+    }
+
+    response.lockedBy = req.user!._id as any;
+    response.lockedAt = new Date();
+    response.workflowStatus = 'shk_in_progress';
+    await response.save();
+
+    res.json({ message: 'Response locked', response });
+  } catch (error) {
+    throw error;
+  }
+});
+
+// Unlock response after SHK editing
+router.post('/:id/unlock', authenticate, async (req: Request, res: Response) => {
+  try {
+    const response = await ResponseModel.findById(req.params.id);
+    if (!response) {
+      res.status(404).json({ error: 'Response not found', code: 'RESPONSE_NOT_FOUND' });
+      return;
+    }
+
+    const currentUserId = req.user!._id;
+    if (!response.lockedBy || response.lockedBy.toString() !== currentUserId) {
+      res.status(403).json({
+        error: 'Only lock owner can unlock response',
+        code: 'NOT_LOCK_OWNER',
+      });
+      return;
+    }
+
+    response.lockedBy = undefined;
+    response.lockedAt = undefined;
+    if (response.workflowStatus !== 'closed') {
+      response.workflowStatus = response.draft ? 'patient_in_progress' : 'patient_completed';
+    }
+    await response.save();
+
+    res.json({ message: 'Response unlocked', response });
+  } catch (error) {
+    throw error;
+  }
+});
+
+// Close response (final lock)
+router.post('/:id/close', authenticate, async (req: Request, res: Response) => {
+  try {
+    const response = await ResponseModel.findById(req.params.id);
+    if (!response) {
+      res.status(404).json({ error: 'Response not found', code: 'RESPONSE_NOT_FOUND' });
+      return;
+    }
+
+    const currentUserId = req.user!._id;
+    if (response.lockedBy && response.lockedBy.toString() !== currentUserId) {
+      res.status(409).json({
+        error: 'Response locked by another SHK',
+        code: 'RESPONSE_LOCKED',
+      });
+      return;
+    }
+
+    response.workflowStatus = 'closed';
+    response.closedAt = new Date();
+    response.lockedBy = undefined;
+    response.lockedAt = undefined;
+    await response.save();
+
+    res.json({ message: 'Response closed successfully', response });
+  } catch (error) {
+    throw error;
+  }
+});
+
 /**
  * @swagger
  * /api/responses/export/csv:
@@ -790,6 +1022,9 @@ router.get('/export/csv', authenticate, async (req: Request, res: Response) => {
     const {
       userId,
       draft,
+      workflowStatus,
+      pid,
+      search,
       completedAtFrom,
       completedAtTo,
     } = req.query;
@@ -803,6 +1038,23 @@ router.get('/export/csv', authenticate, async (req: Request, res: Response) => {
 
     if (draft !== undefined) {
       filter.draft = draft === 'true';
+    }
+    if (workflowStatus) {
+      filter.workflowStatus = workflowStatus;
+    }
+    if (pid) {
+      filter.pid = pid;
+    }
+    if (search) {
+      const regex = new RegExp(String(search), 'i');
+      filter.$or = [
+        { intervieweeName: regex },
+        { intervieweeEmail: regex },
+        { intervieweePhone: regex },
+        { pid: regex },
+        { 'answers.value': regex },
+        { 'answers.questionId': regex },
+      ];
     }
 
     if (completedAtFrom || completedAtTo) {
@@ -819,41 +1071,7 @@ router.get('/export/csv', authenticate, async (req: Request, res: Response) => {
       .populate('userId', 'email profile.firstName profile.lastName')
       .sort({ createdAt: -1 });
 
-    // Generate CSV
-    const headers = [
-      'ID',
-      'Interviewer Email',
-      'Interviewer Name',
-      'Interviewee Name',
-      'Interviewee Email',
-      'Interviewee Phone',
-      'Status',
-      'Created At',
-      'Completed At',
-      'Has Signature',
-    ];
-
-    const rows = responses.map((r) => [
-      r._id.toString(),
-      (r.userId as any)?.email || 'N/A',
-      (r.userId as any)?.profile
-        ? `${(r.userId as any).profile.firstName} ${(r.userId as any).profile.lastName}`
-        : 'N/A',
-      r.intervieweeName || '',
-      r.intervieweeEmail || '',
-      r.intervieweePhone || '',
-      r.draft ? 'Draft' : 'Completed',
-      r.createdAt.toISOString(),
-      r.completedAt ? r.completedAt.toISOString() : '',
-      r.signatureBase64 ? 'Yes' : 'No',
-    ]);
-
-    const csv = [
-      headers.join(','),
-      ...rows.map((row) =>
-        row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(',')
-      ),
-    ].join('\n');
+    const csv = buildResponseCsv(responses as any[]);
 
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader(

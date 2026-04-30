@@ -16,6 +16,21 @@ export interface IResponse extends Document {
   intervieweeName?: string;
   intervieweeEmail?: string;
   intervieweePhone?: string;
+  workflowStatus: 'patient_in_progress' | 'patient_completed' | 'shk_in_progress' | 'closed';
+  lockedBy?: mongoose.Types.ObjectId;
+  lockedAt?: Date;
+  closedAt?: Date;
+  changeLog: Array<{
+    changedBy: mongoose.Types.ObjectId;
+    changedAt: Date;
+    source: 'PATIENT' | 'SHK' | 'SYSTEM';
+    reason?: string;
+    changes: Array<{
+      field: string;
+      previousValue: string;
+      nextValue: string;
+    }>;
+  }>;
 }
 
 const AnswerSchema = new Schema({
@@ -87,6 +102,48 @@ const ResponseSchema = new Schema<IResponse>(
       type: String,
       trim: true,
     },
+    workflowStatus: {
+      type: String,
+      enum: ['patient_in_progress', 'patient_completed', 'shk_in_progress', 'closed'],
+      default: 'patient_in_progress',
+    },
+    lockedBy: {
+      type: Schema.Types.ObjectId,
+      ref: 'User',
+    },
+    lockedAt: {
+      type: Date,
+    },
+    closedAt: {
+      type: Date,
+    },
+    changeLog: {
+      type: [
+        new Schema(
+          {
+            changedBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+            changedAt: { type: Date, required: true },
+            source: { type: String, enum: ['PATIENT', 'SHK', 'SYSTEM'], required: true },
+            reason: { type: String },
+            changes: {
+              type: [
+                new Schema(
+                  {
+                    field: { type: String, required: true },
+                    previousValue: { type: String, default: '' },
+                    nextValue: { type: String, default: '' },
+                  },
+                  { _id: false }
+                ),
+              ],
+              default: [],
+            },
+          },
+          { _id: false }
+        ),
+      ],
+      default: [],
+    },
   },
   {
     timestamps: true,
@@ -101,6 +158,8 @@ ResponseSchema.index({ createdAt: -1 });
 ResponseSchema.index({ intervieweeName: 1 });
 ResponseSchema.index({ intervieweeEmail: 1 });
 ResponseSchema.index({ pid: 1 });
+ResponseSchema.index({ workflowStatus: 1 });
+ResponseSchema.index({ lockedBy: 1 });
 
 export const Response = mongoose.model<IResponse>('Response', ResponseSchema);
 

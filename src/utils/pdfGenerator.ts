@@ -40,9 +40,14 @@ const QUESTION_LABELS: Record<string, string> = {
   q10: 'Photo (Optional)',
   // Step 1: General Information
   name: 'Name',
+  firstName: 'Vorname',
+  lastName: 'Nachname',
+  pid: 'Patient ID (PID)',
   email: 'Email',
   birthDate: 'Geburtsdatum (Birth Date)',
   date: 'Datum (Date)',
+  consentExplainedBy: 'Ich wurde von ___ über das ...',
+  consentDiscussionPoints: 'Zusätzlich besprochene Punkte',
   // Step 2: Current Complaints
   hasChestComplaints: 'Haben Sie derzeit Beschwerden im Brustbereich?',
   painType: 'Art der Schmerzen (Type of pain)',
@@ -74,6 +79,7 @@ const QUESTION_LABELS: Record<string, string> = {
   riskFactors: 'Haben Sie folgende Erkrankungen oder Risikofaktoren?',
   // Step 6: Previous Examinations
   previousExams: 'Vorangegangene Untersuchungen / Eingriffe',
+  echoFreeText: 'Echokardiographie Freitext',
   // Step 7
   signature: 'Signature',
 };
@@ -92,6 +98,9 @@ const QUESTION_TYPE_LABELS: Record<string, string> = {
 };
 
 function getQuestionLabel(questionId: string, fallbackIndex: number): string {
+  if (questionId.startsWith('echoPhotos_')) {
+    return `Echokardiographie Photo ${questionId.split('_')[1] || ''}`.trim();
+  }
   return QUESTION_LABELS[questionId] || `Question ${fallbackIndex}`;
 }
 
@@ -211,6 +220,32 @@ export const generateResponsePDF = async (
           doc.moveDown(0.6);
         });
         doc.moveDown(0.3);
+      }
+
+      // —— Photo attachments (echo/documentation) ——
+      const photoAnswers = (response.answers || []).filter((a: any) => a.imageUri && String(a.imageUri).startsWith('data:image'));
+      if (photoAnswers.length > 0) {
+        doc.addPage();
+        doc.fontSize(13).fillColor('#333333').text('Photo Documentation', { underline: true });
+        doc.moveDown(0.6);
+        let y = doc.y;
+        const pageBottom = doc.page.height - 60;
+        for (let i = 0; i < photoAnswers.length; i += 1) {
+          const pa = photoAnswers[i];
+          if (y > pageBottom - 160) {
+            doc.addPage();
+            y = 60;
+          }
+          doc.fontSize(10).fillColor('#000000').text(`Photo ${i + 1}`, 50, y);
+          try {
+            const base64Data = pa.imageUri.includes(',') ? pa.imageUri.split(',')[1] : pa.imageUri;
+            const img = Buffer.from(base64Data, 'base64');
+            doc.image(img, 50, y + 14, { fit: [240, 150] });
+          } catch (e) {
+            doc.fontSize(10).fillColor('#666666').text('Could not render image', 50, y + 20);
+          }
+          y += 180;
+        }
       }
 
       // —— Signature ——
