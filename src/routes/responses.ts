@@ -1,8 +1,12 @@
 import express, { Request, Response } from 'express';
 import { Response as ResponseModel } from '../models/Response';
 import { authenticate } from '../middleware/auth';
-import PDFDocument from 'pdfkit';
 import { generateResponsePDF } from '../utils/pdfGenerator';
+import {
+  buildConsentHtmlDocument,
+  buildConsentPdfBuffer,
+  ConsentDocxMissingError,
+} from '../utils/consentPatientDocument';
 import { sendConsentEmailWithPdf, sendSurveyCompletionEmail } from '../utils/email';
 import { generatePid } from '../utils/pid';
 import { buildResponseCsv } from '../utils/responseExport';
@@ -23,52 +27,48 @@ const TRACKED_UPDATE_FIELDS = [
 
 const shouldSendSurveyCompletionEmail = process.env.SEND_SURVEY_COMPLETION_EMAIL === 'true';
 
+/** Full HTML rendered from bundled UKB consent DOCX (official patient information). Public. */
+router.get('/consent-document/html', async (req: Request, res: Response) => {
+  const name = typeof req.query.name === 'string' ? req.query.name : '';
+  const date =
+    typeof req.query.date === 'string' && req.query.date.trim()
+      ? req.query.date.trim()
+      : new Date().toISOString().split('T')[0];
+
+  try {
+    const html = await buildConsentHtmlDocument(name, date);
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'public, max-age=300');
+    res.send(html);
+  } catch (err: unknown) {
+    if (err instanceof ConsentDocxMissingError) {
+      console.error('[consent-document/html]', err.message);
+      res.status(503).send('Consent document asset is not available on this server.');
+      return;
+    }
+    console.error('[consent-document/html]', err);
+    res.status(500).send('Failed to render consent document.');
+  }
+});
+
+/** PDF: prefers optional bundled Word-export PDF; else plaintext-from-DOCX via pdfkit; else legacy stub. Public. */
 router.get('/consent-document/pdf', async (req: Request, res: Response) => {
   const name = typeof req.query.name === 'string' ? req.query.name : '';
   const date =
     typeof req.query.date === 'string' && req.query.date.trim()
-      ? req.query.date
+      ? req.query.date.trim()
       : new Date().toISOString().split('T')[0];
 
-  const doc = new PDFDocument({ margin: 48, size: 'A4' });
-  const chunks: Buffer[] = [];
-  doc.on('data', (chunk) => chunks.push(chunk as Buffer));
-  doc.on('end', () => {
-    const pdfBuffer = Buffer.concat(chunks);
+  try {
+    const { buffer } = await buildConsentPdfBuffer(name, date);
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', 'inline; filename="patientinformation-einwilligung.pdf"');
-    res.send(pdfBuffer);
-  });
-
-  doc.fontSize(16).text('Patientinformation und Einwilligung', { underline: true });
-  doc.moveDown(0.7);
-  doc.fontSize(11).text('Herz Check Bonn');
-  doc.moveDown();
-  doc
-    .fontSize(10)
-    .text(
-      'Dieses Dokument informiert uber die freiwillige Teilnahme am Screeningprojekt. ' +
-        'Die Teilnahme ersetzt keine arztliche Diagnostik oder Behandlung. ' +
-        'Gesundheitsdaten werden nur fur die Projektdurchfuhrung, Dokumentation und anonymisierte Auswertung verarbeitet.'
-    );
-  doc.moveDown(0.8);
-  doc
-    .fontSize(10)
-    .text(
-      'Sie konnen Ihre Einwilligung jederzeit fur die Zukunft widerrufen. ' +
-        'Bei Fragen wenden Sie sich bitte an das Herz Check Bonn Team.'
-    );
-  doc.moveDown(1.2);
-
-  doc.fontSize(10).text(`Name (Druckbuchstaben): ${name || '__________________________'}`);
-  doc.moveDown(0.6);
-  doc.text(`Datum: ${date}`);
-  doc.moveDown(1.2);
-  doc.text('Unterschrift teilnehmende Person: __________________________');
-  doc.moveDown(1.2);
-  doc.text('Unterschrift aufklarende Person: __________________________');
-
-  doc.end();
+    res.setHeader('Content-Disposition', 'inline; filename="Patienteninformation-Einwilligung.pdf"');
+    res.setHeader('Cache-Control', 'public, max-age=300');
+    res.send(buffer);
+  } catch (err: unknown) {
+    console.error('[consent-document/pdf]', err);
+    res.status(500).send('Failed to generate consent PDF.');
+  }
 });
 
 /**
