@@ -23,6 +23,54 @@ const TRACKED_UPDATE_FIELDS = [
 
 const shouldSendSurveyCompletionEmail = process.env.SEND_SURVEY_COMPLETION_EMAIL === 'true';
 
+router.get('/consent-document/pdf', async (req: Request, res: Response) => {
+  const name = typeof req.query.name === 'string' ? req.query.name : '';
+  const date =
+    typeof req.query.date === 'string' && req.query.date.trim()
+      ? req.query.date
+      : new Date().toISOString().split('T')[0];
+
+  const doc = new PDFDocument({ margin: 48, size: 'A4' });
+  const chunks: Buffer[] = [];
+  doc.on('data', (chunk) => chunks.push(chunk as Buffer));
+  doc.on('end', () => {
+    const pdfBuffer = Buffer.concat(chunks);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'inline; filename="patientinformation-einwilligung.pdf"');
+    res.send(pdfBuffer);
+  });
+
+  doc.fontSize(16).text('Patientinformation und Einwilligung', { underline: true });
+  doc.moveDown(0.7);
+  doc.fontSize(11).text('Herz Check Bonn');
+  doc.moveDown();
+  doc
+    .fontSize(10)
+    .text(
+      'Dieses Dokument informiert uber die freiwillige Teilnahme am Screeningprojekt. ' +
+        'Die Teilnahme ersetzt keine arztliche Diagnostik oder Behandlung. ' +
+        'Gesundheitsdaten werden nur fur die Projektdurchfuhrung, Dokumentation und anonymisierte Auswertung verarbeitet.'
+    );
+  doc.moveDown(0.8);
+  doc
+    .fontSize(10)
+    .text(
+      'Sie konnen Ihre Einwilligung jederzeit fur die Zukunft widerrufen. ' +
+        'Bei Fragen wenden Sie sich bitte an das Herz Check Bonn Team.'
+    );
+  doc.moveDown(1.2);
+
+  doc.fontSize(10).text(`Name (Druckbuchstaben): ${name || '__________________________'}`);
+  doc.moveDown(0.6);
+  doc.text(`Datum: ${date}`);
+  doc.moveDown(1.2);
+  doc.text('Unterschrift teilnehmende Person: __________________________');
+  doc.moveDown(1.2);
+  doc.text('Unterschrift aufklarende Person: __________________________');
+
+  doc.end();
+});
+
 /**
  * @swagger
  * /api/responses:
