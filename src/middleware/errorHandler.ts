@@ -90,6 +90,7 @@ export const errorHandler = (
   res: Response,
   next: NextFunction
 ): void => {
+  const requestId = (req as any).requestId || (req.headers['x-request-id'] as string) || 'unknown';
   let statusCode = 500;
   let error: ApiError = {
     error: 'Internal server error',
@@ -167,6 +168,17 @@ export const errorHandler = (
       code: 'TOKEN_EXPIRED',
     };
   }
+  // Body too large (express.json / urlencoded limit exceeded)
+  else if (err?.type === 'entity.too.large' || err?.status === 413) {
+    statusCode = 413;
+    error = {
+      error: 'Payload too large',
+      code: 'PAYLOAD_TOO_LARGE',
+      details: {
+        hint: 'Reduce image/file sizes and retry.',
+      },
+    };
+  }
   // Default error
   else {
     error = {
@@ -192,9 +204,15 @@ export const errorHandler = (
     console.error(`[${statusCode}] Duplicate Key Error:`, Object.keys(err.keyPattern)[0]);
   } else {
     // For other errors, log full details
-    console.error(`[${statusCode}] Error:`, err.message || err);
+    console.error(`[${statusCode}] [${requestId}] Error:`, err.message || err);
   }
 
-  res.status(statusCode).json(error);
+  res.status(statusCode).json({
+    ...error,
+    message: error.error,
+    requestId,
+    path: req.originalUrl || req.path,
+    timestamp: new Date().toISOString(),
+  });
 };
 

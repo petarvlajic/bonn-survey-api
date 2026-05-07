@@ -1,10 +1,12 @@
 import { Request, Response, NextFunction } from 'express';
+import crypto from 'crypto';
 
 interface RequestLog {
   timestamp: string;
   method: string;
   path: string;
   ip: string;
+  requestId: string;
   userAgent?: string;
   statusCode?: number;
   responseTime?: number;
@@ -30,6 +32,13 @@ export const logger = (
     'unknown';
 
   const fullPath = req.originalUrl || req.path;
+  const requestId =
+    (req.headers['x-request-id'] as string) ||
+    (typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`);
+  (req as any).requestId = requestId;
+  res.setHeader('x-request-id', requestId);
 
   // Log request start (full URL so you see /api/auth/register etc.)
   const logData: RequestLog = {
@@ -37,11 +46,12 @@ export const logger = (
     method: req.method,
     path: fullPath,
     ip: clientIp,
+    requestId,
     userAgent: req.headers['user-agent'],
   };
 
   console.log(
-    `[API] >>> ${logData.method} ${fullPath} (IP: ${logData.ip})`
+    `[API] >>> [${logData.requestId}] ${logData.method} ${fullPath} (IP: ${logData.ip})`
   );
 
   // Override res.end to capture response details
@@ -57,7 +67,7 @@ export const logger = (
     const statusEmoji =
       statusCode >= 500 ? '❌' : statusCode >= 400 ? '⚠️' : '✅';
     console.log(
-      `[API] <<< ${statusEmoji} ${logData.method} ${fullPath} ${statusCode} ${responseTime}ms`
+      `[API] <<< [${logData.requestId}] ${statusEmoji} ${logData.method} ${fullPath} ${statusCode} ${responseTime}ms`
     );
 
     // Call original end and return the result

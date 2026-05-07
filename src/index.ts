@@ -37,6 +37,7 @@ const limiter = rateLimit({
   max: 100, // limit each IP to 100 requests per windowMs
   message: {
     error: 'Too many requests from this IP, please try again later',
+    message: 'Too many requests from this IP, please try again later',
     code: 'RATE_LIMIT_EXCEEDED',
   },
 });
@@ -99,10 +100,14 @@ app.use('/admin', express.static('public/admin'));
 
 // 404 handler
 app.use((req: Request, res: Response) => {
+  const requestId = (req as any).requestId || (req.headers['x-request-id'] as string) || 'unknown';
   res.status(404).json({
     error: 'Route not found',
+    message: 'Route not found',
     code: 'NOT_FOUND',
-    path: req.path,
+    path: req.originalUrl || req.path,
+    requestId,
+    timestamp: new Date().toISOString(),
   });
 });
 
