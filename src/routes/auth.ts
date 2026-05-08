@@ -1,14 +1,25 @@
 import crypto from 'crypto';
 import express, { Request, Response } from 'express';
+import mongoose from 'mongoose';
 import { User } from '../models/User';
 import { hashPassword, comparePassword } from '../utils/password';
 import { generateToken } from '../utils/jwt';
 import { validateRegister, validateLogin, validatePasswordStrength } from '../middleware/validation';
 import { authenticate } from '../middleware/auth';
+import { requireAdmin } from '../middleware/requireAdmin';
 import { sendPasswordResetEmail } from '../utils/email';
 
 const router = express.Router();
 const RESET_TOKEN_EXPIRY_MS = 3600000; // 1 hour
+
+function parseAdminEmailSet(): Set<string> {
+  return new Set(
+    (process.env.ADMIN_EMAILS ?? '')
+      .split(',')
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean)
+  );
+}
 
 /**
  * @swagger
@@ -77,17 +88,6 @@ router.post('/register', validateRegister, async (req: Request, res: Response) =
       position,
       examinerSignatureBase64,
     } = req.body;
-    if (
-      typeof examinerSignatureBase64 !== 'string' ||
-      !examinerSignatureBase64.trim() ||
-      !examinerSignatureBase64.startsWith('data:')
-    ) {
-      res.status(400).json({
-        error: 'Examiner signature (Unterschrift Prüfperson) is required as an image/data URL.',
-        code: 'MISSING_EXAMINER_SIGNATURE',
-      });
-      return;
-    }
     console.log('[Auth] POST /register – email:', email, 'firstName:', firstName);
 
     // Check if user already exists
@@ -105,17 +105,32 @@ router.post('/register', validateRegister, async (req: Request, res: Response) =
     const hashedPassword = await hashPassword(password);
 
     // Create user
+    const profile: {
+      firstName: string;
+      lastName: string;
+      phone?: string;
+      avatar?: string;
+      position?: string;
+      examinerSignatureBase64?: string;
+    } = {
+      firstName,
+      lastName,
+      phone,
+      avatar,
+      position,
+    };
+    if (
+      typeof examinerSignatureBase64 === 'string' &&
+      examinerSignatureBase64.trim() &&
+      examinerSignatureBase64.startsWith('data:')
+    ) {
+      profile.examinerSignatureBase64 = examinerSignatureBase64;
+    }
+
     const user = new User({
       email,
       password: hashedPassword,
-      profile: {
-        firstName,
-        lastName,
-        phone,
-        avatar,
-        position,
-        examinerSignatureBase64,
-      },
+      profile,
     });
 
     await user.save();
@@ -214,6 +229,15 @@ router.post('/login', validateLogin, async (req: Request, res: Response) => {
         code: 'INVALID_CREDENTIALS',
       });
       return;
+    }
+
+    const adminEmails = parseAdminEmailSet();
+    if (adminEmails.has(String(email).toLowerCase())) {
+      const r = (user as { role?: string }).role;
+      if (r !== 'admin') {
+        user.role = 'admin';
+        await user.save();
+      }
     }
 
     console.log('[Auth] POST /login – 200 OK:', email);
@@ -654,7 +678,7 @@ router.put('/profile', authenticate, async (req: Request, res: Response) => {
         email: userObj.email,
         phone: (userObj.profile && userObj.profile.phone) || '',
         position: (userObj.profile && userObj.profile.position) || '',
-        role: 'user', // You can add role field to User model if needed
+        role: userObj.role === 'admin' ? 'admin' : 'user',
       },
     };
 
@@ -675,6 +699,59 @@ router.put('/profile', authenticate, async (req: Request, res: Response) => {
     throw error;
   }
 });
+
+router.get('/admin/users', authenticate, requireAdmin, async (_req: Request, res: Response) => {
+  const users = await User.find({}, 'email profile role createdAt')
+    .sort({ createdAt: -1 })
+    .lean();
+  res.json({
+    users: users.map((u) => ({
+      id: u._id.toString(),
+      email: u.email,
+      firstName: u.profile?.firstName,
+      lastName: u.profile?.lastName,
+      role: u.role === 'admin' ? 'admin' : 'user',
+      createdAt: u.createdAt,
+    })),
+  });
+});
+
+router.patch(
+  '/admin/users/:userId/role',
+  authenticate,
+  requireAdmin,
+  async (req: Request, res: Response) => {
+    const { userId } = req.params;
+    const { role } = req.body ?? {};
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      res.status(400).json({ error: 'Invalid user id', code: 'INVALID_ID' });
+      return;
+    }
+    if (role !== 'user' && role !== 'admin') {
+      res.status(400).json({ error: 'role must be user or admin', code: 'INVALID_ROLE' });
+      return;
+    }
+    if (userId === req.user!._id && role === 'user') {
+      res.status(400).json({ error: 'Cannot demote yourself', code: 'SELF_DEMOTE' });
+      return;
+    }
+    const target = await User.findById(userId);
+    if (!target) {
+      res.status(404).json({ error: 'User not found', code: 'USER_NOT_FOUND' });
+      return;
+    }
+    target.role = role;
+    await target.save();
+    res.json({
+      message: 'Role updated',
+      user: {
+        id: target._id.toString(),
+        email: target.email,
+        role: target.role,
+      },
+    });
+  },
+);
 
 export default router;
 

@@ -3,6 +3,8 @@ import mongoose, { Schema, Document } from 'mongoose';
 export interface IUser extends Document {
   email: string;
   password: string;
+  /** Dashboard: `admin` sees user list (`/api/auth/admin/users`). Default `user` for SHK staff. */
+  role: 'user' | 'admin';
   profile: {
     firstName: string;
     lastName: string;
@@ -35,6 +37,11 @@ const UserSchema = new Schema<IUser>(
       type: String,
       required: true,
       select: false, // Don't return password by default
+    },
+    role: {
+      type: String,
+      enum: ['user', 'admin'],
+      default: 'user',
     },
     profile: {
       firstName: {

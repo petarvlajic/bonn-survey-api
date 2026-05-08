@@ -10,6 +10,7 @@ declare global {
       user?: {
         _id: string;
         email: string;
+        role: 'user' | 'admin';
         profile: {
           firstName: string;
           lastName: string;
@@ -38,16 +39,18 @@ export const authenticate = async (
     const token = authHeader.substring(7);
     const decoded = verifyToken(token);
     
-    const user = await User.findById(decoded.userId).select('email profile');
+    const user = await User.findById(decoded.userId).select('email profile role');
     
     if (!user) {
       res.status(401).json({ error: 'User not found', code: 'USER_NOT_FOUND' });
       return;
     }
 
+    const roleRaw = (user as { role?: string }).role;
     req.user = {
       _id: user._id.toString(),
       email: user.email,
+      role: roleRaw === 'admin' ? 'admin' : 'user',
       profile: user.profile,
     };
 
