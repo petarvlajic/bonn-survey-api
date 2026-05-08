@@ -4,6 +4,7 @@ import request from 'supertest';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import { Response as ResponseModel } from '../src/models/Response';
+import '../src/models/User';
 
 vi.mock('../src/middleware/auth', () => ({
   authenticate: (req: any, _res: any, next: any) => {
@@ -17,7 +18,13 @@ vi.mock('../src/middleware/auth', () => ({
   },
 }));
 
+vi.mock('../src/utils/email', () => ({
+  sendConsentEmailWithPdf: vi.fn(async () => undefined),
+  sendSurveyCompletionEmail: vi.fn(async () => undefined),
+}));
+
 import responsesRouter from '../src/routes/responses';
+import { SHK_FOLLOWUP_ITEMS } from '../src/utils/shkFollowUpQuestions';
 
 describe('responses routes integration', () => {
   let mongoServer: MongoMemoryServer;
@@ -354,6 +361,115 @@ describe('responses routes integration', () => {
     const resInvalid = await request(app).get('/api/responses/not-a-valid-id');
     expect(resInvalid.status).toBe(400);
     expect(resInvalid.body.code).toBe('INVALID_ID');
+  });
+
+  it('patient-bounded create sets pending_shk_followup and blocks close until follow-up', async () => {
+    if (!mongoReady) {
+      expect(true).toBe(true);
+      return;
+    }
+    const owner = new mongoose.Types.ObjectId().toString();
+    const createRes = await request(app)
+      .post('/api/responses')
+      .set('x-user-id', owner)
+      .send({
+        answers: [{ questionId: 'q1', type: 'TEXT', value: 'x' }],
+        draft: false,
+        status: 'completed',
+        boundedPatientSubmit: true,
+        consentPdfBase64: 'data:application/pdf;base64,QUJDCg==',
+        intervieweeName: 'Pat Example',
+        intervieweeEmail: 'pat.example@example.com',
+        signature: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+      });
+    expect(createRes.status).toBe(201);
+    expect(createRes.body.response.workflowStatus).toBe('pending_shk_followup');
+    expect(createRes.body.response.patientBoundedSubmit).toBe(true);
+    expect(createRes.body.response.consentPdfBase64Deferred).toBeDefined();
+
+    const rid = createRes.body.response._id as string;
+
+    const closeBlocked = await request(app).post(`/api/responses/${rid}/close`).set('x-user-id', owner);
+    expect(closeBlocked.status).toBe(400);
+    expect(closeBlocked.body.code).toBe('SHK_FOLLOWUP_REQUIRED');
+  });
+
+  it('requires lock and complete answers for follow-up completion; then closes', async () => {
+    if (!mongoReady) {
+      expect(true).toBe(true);
+      return;
+    }
+    const owner = new mongoose.Types.ObjectId().toString();
+    const createRes = await request(app)
+      .post('/api/responses')
+      .set('x-user-id', owner)
+      .send({
+        answers: [{ questionId: 'q1', type: 'TEXT', value: 'x' }],
+        draft: false,
+        status: 'completed',
+        boundedPatientSubmit: true,
+        consentPdfBase64: 'data:application/pdf;base64,QUJDCg==',
+        intervieweeName: 'Pat Two',
+        intervieweeEmail: 'pat.two@example.com',
+        signature: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+      });
+    expect(createRes.status).toBe(201);
+    const rid = createRes.body.response._id as string;
+
+    const allTrue = Object.fromEntries(SHK_FOLLOWUP_ITEMS.map((item) => [item.id, true]));
+    const needLock = await request(app)
+      .post(`/api/responses/${rid}/followup/complete`)
+      .set('x-user-id', owner)
+      .send({ answers: allTrue });
+    expect(needLock.status).toBe(403);
+    expect(needLock.body.code).toBe('LOCK_REQUIRED');
+
+    await request(app).post(`/api/responses/${rid}/lock`).set('x-user-id', owner);
+
+    const partial = await request(app)
+      .post(`/api/responses/${rid}/followup/complete`)
+      .set('x-user-id', owner)
+      .send({
+        answers: { [SHK_FOLLOWUP_ITEMS[0].id]: true },
+      });
+    expect(partial.status).toBe(400);
+    expect(partial.body.code).toBe('INCOMPLETE_FOLLOWUP');
+
+    const done = await request(app)
+      .post(`/api/responses/${rid}/followup/complete`)
+      .set('x-user-id', owner)
+      .send({ answers: allTrue });
+    expect(done.status).toBe(200);
+    expect(done.body.response.workflowStatus).toBe('closed');
+    expect(done.body.response.shkFollowUp?.completedAt).toBeDefined();
+
+    const fromDb = await ResponseModel.findById(rid).lean();
+    expect(fromDb?.consentPdfBase64Deferred).toBeUndefined();
+  });
+
+  it('unlock restores pending_shk_followup for bounded responses', async () => {
+    if (!mongoReady) {
+      expect(true).toBe(true);
+      return;
+    }
+    const owner = new mongoose.Types.ObjectId();
+    const ownerStr = owner.toString();
+    const resp = await ResponseModel.create({
+      userId: owner,
+      draft: false,
+      patientBoundedSubmit: true,
+      workflowStatus: 'pending_shk_followup',
+      answers: [{ questionId: 'q', type: 'TEXT', value: 'v' }],
+      intervieweeEmail: 'u@example.com',
+      intervieweeName: 'Unlock Test',
+    });
+
+    await request(app).post(`/api/responses/${resp._id}/lock`).set('x-user-id', ownerStr);
+    const unlockRes = await request(app)
+      .post(`/api/responses/${resp._id}/unlock`)
+      .set('x-user-id', ownerStr);
+    expect(unlockRes.status).toBe(200);
+    expect(unlockRes.body.response.workflowStatus).toBe('pending_shk_followup');
   });
 });
 

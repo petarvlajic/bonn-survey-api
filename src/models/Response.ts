@@ -16,7 +16,20 @@ export interface IResponse extends Document {
   intervieweeName?: string;
   intervieweeEmail?: string;
   intervieweePhone?: string;
-  workflowStatus: 'patient_in_progress' | 'patient_completed' | 'shk_in_progress' | 'closed';
+  workflowStatus:
+    | 'patient_in_progress'
+    | 'patient_completed'
+    | 'pending_shk_followup'
+    | 'shk_in_progress'
+    | 'closed';
+  /** True when the response was finalized from patient-bounded app mode (awaits SHK follow-up + emails). */
+  patientBoundedSubmit?: boolean;
+  /** Consent PDF (base64) queued until SHK completes follow-up (patient-bounded flow). */
+  consentPdfBase64Deferred?: string;
+  shkFollowUp?: {
+    answers: Record<string, boolean>;
+    completedAt?: Date;
+  };
   lockedBy?: mongoose.Types.ObjectId;
   lockedAt?: Date;
   closedAt?: Date;
@@ -104,8 +117,30 @@ const ResponseSchema = new Schema<IResponse>(
     },
     workflowStatus: {
       type: String,
-      enum: ['patient_in_progress', 'patient_completed', 'shk_in_progress', 'closed'],
+      enum: [
+        'patient_in_progress',
+        'patient_completed',
+        'pending_shk_followup',
+        'shk_in_progress',
+        'closed',
+      ],
       default: 'patient_in_progress',
+    },
+    patientBoundedSubmit: {
+      type: Boolean,
+      default: false,
+    },
+    consentPdfBase64Deferred: {
+      type: String,
+    },
+    shkFollowUp: {
+      type: new Schema(
+        {
+          answers: { type: Schema.Types.Mixed, default: {} },
+          completedAt: { type: Date },
+        },
+        { _id: false }
+      ),
     },
     lockedBy: {
       type: Schema.Types.ObjectId,

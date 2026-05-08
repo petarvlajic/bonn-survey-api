@@ -9,6 +9,8 @@ export interface IUser extends Document {
     phone?: string;
     avatar?: string;
     position?: string;
+    /** Data-URL or raw base64 image — shown on exported PDF as investigator signature */
+    examinerSignatureBase64?: string;
   };
   passwordResetToken?: string;
   passwordResetExpires?: Date;
@@ -55,6 +57,9 @@ const UserSchema = new Schema<IUser>(
       position: {
         type: String,
         trim: true,
+      },
+      examinerSignatureBase64: {
+        type: String,
       },
     },
     passwordResetToken: {

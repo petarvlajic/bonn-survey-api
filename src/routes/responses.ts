@@ -11,6 +11,7 @@ import { sendConsentEmailWithPdf, sendSurveyCompletionEmail } from '../utils/ema
 import { generatePid } from '../utils/pid';
 import { buildResponseCsv } from '../utils/responseExport';
 import { buildFieldChanges, verifyPostClosePin } from '../utils/audit';
+import { SHK_FOLLOWUP_ITEMS } from '../utils/shkFollowUpQuestions';
 
 const router = express.Router();
 const TRACKED_UPDATE_FIELDS = [
@@ -26,6 +27,71 @@ const TRACKED_UPDATE_FIELDS = [
 ] as const;
 
 const shouldSendSurveyCompletionEmail = process.env.SEND_SURVEY_COMPLETION_EMAIL === 'true';
+
+function parseBase64Payload(input: string): Buffer | null {
+  if (!input || typeof input !== 'string') return null;
+  const base64Part = input.includes(',') ? input.split(',').slice(1).join(',') : input;
+  try {
+    const buf = Buffer.from(base64Part, 'base64');
+    return buf.length > 0 ? buf : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Sends consent PDF + survey completion emails for patient-bounded flows (after SHK follow-up).
+ */
+async function sendDeferredPatientBoundedEmails(responseId: string): Promise<void> {
+  const doc = await ResponseModel.findById(responseId).populate(
+    'userId',
+    'email profile.firstName profile.lastName profile.examinerSignatureBase64'
+  );
+  if (!doc || !doc.intervieweeEmail) {
+    console.log(`[API] Deferred emails skipped for ${responseId}: missing intervieweeEmail`);
+    return;
+  }
+
+  const consentBuf = parseBase64Payload(String(doc.consentPdfBase64Deferred || ''));
+  if (consentBuf) {
+    try {
+      await sendConsentEmailWithPdf(
+        doc.intervieweeEmail,
+        doc.intervieweeName,
+        doc.birthDate,
+        consentBuf
+      );
+      console.log(`[API] Deferred consent email sent to ${doc.intervieweeEmail}`);
+    } catch (consentErr: unknown) {
+      console.error('[API] Deferred consent email failed:', (consentErr as Error).message);
+    }
+  } else {
+    console.log('[API] Deferred consent skipped: no stored consentPdfBase64Deferred');
+  }
+
+  if (shouldSendSurveyCompletionEmail) {
+    try {
+      const savePDF = process.env.SAVE_PDF_TO_DISK !== 'false';
+      const refreshed = await ResponseModel.findById(responseId).populate(
+        'userId',
+        'email profile.firstName profile.lastName profile.examinerSignatureBase64'
+      );
+      if (refreshed) {
+        const pdfBuffer = await generateResponsePDF(refreshed, savePDF);
+        await sendSurveyCompletionEmail(
+          refreshed.intervieweeEmail!,
+          refreshed.intervieweeName,
+          pdfBuffer
+        );
+        console.log(`[API] Deferred survey completion email sent to ${refreshed.intervieweeEmail}`);
+      }
+    } catch (surveyErr: unknown) {
+      console.error('[API] Deferred survey email failed:', (surveyErr as Error).message);
+    }
+  }
+
+  await ResponseModel.updateOne({ _id: responseId }, { $unset: { consentPdfBase64Deferred: '' } });
+}
 
 /** Full HTML rendered from bundled UKB consent DOCX (official patient information). Public. */
 router.get('/consent-document/html', async (req: Request, res: Response) => {
@@ -202,7 +268,7 @@ router.get('/', authenticate, async (req: Request, res: Response) => {
 
     const [responses, total] = await Promise.all([
       ResponseModel.find(filter)
-        .populate('userId', 'email profile.firstName profile.lastName')
+        .populate('userId', 'email profile.firstName profile.lastName profile.examinerSignatureBase64')
         .populate('lockedBy', 'email profile.firstName profile.lastName')
         .sort(sort)
         .skip(skip)
@@ -259,8 +325,10 @@ router.get('/:id', authenticate, async (req: Request, res: Response) => {
       return;
     }
 
-    const response = await ResponseModel.findById(req.params.id)
-      .populate('userId', 'email profile.firstName profile.lastName');
+    const response = await ResponseModel.findById(req.params.id).populate(
+      'userId',
+      'email profile.firstName profile.lastName profile.examinerSignatureBase64'
+    );
 
     if (!response) {
       res.status(404).json({
@@ -335,6 +403,7 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
       intervieweeEmail,
       intervieweePhone,
       submittedAt, // Map to completedAt if status is completed
+      boundedPatientSubmit,
     } = req.body;
 
     // Use answers or answer (singular)
@@ -482,6 +551,17 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
 
     const effectivePid = pid || generatePid();
 
+    const useBoundedPatientFlow =
+      !finalDraft &&
+      (boundedPatientSubmit === true || boundedPatientSubmit === 'true');
+    const consentPdfBase64Deferred =
+      useBoundedPatientFlow && consentPdfBase64 ? String(consentPdfBase64) : undefined;
+    const initialWorkflow = finalDraft
+      ? 'patient_in_progress'
+      : useBoundedPatientFlow
+        ? 'pending_shk_followup'
+        : 'patient_completed';
+
     const response = new ResponseModel({
       userId: req.user!._id,
       pid: effectivePid,
@@ -490,7 +570,9 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
       signatureBase64: finalSignatureBase64,
       draft: finalDraft,
       completedAt,
-      workflowStatus: finalDraft ? 'patient_in_progress' : 'patient_completed',
+      workflowStatus: initialWorkflow,
+      patientBoundedSubmit: useBoundedPatientFlow,
+      ...(consentPdfBase64Deferred ? { consentPdfBase64Deferred } : {}),
       intervieweeName,
       intervieweeEmail,
       intervieweePhone,
@@ -498,10 +580,15 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
 
     try {
       await response.save();
-      await response.populate('userId', 'email profile.firstName profile.lastName');
+      await response.populate('userId', 'email profile.firstName profile.lastName profile.examinerSignatureBase64');
 
       // Optional survey-response email (disabled by default).
-      if (!finalDraft && response.intervieweeEmail && shouldSendSurveyCompletionEmail) {
+      if (
+        !finalDraft &&
+        response.intervieweeEmail &&
+        shouldSendSurveyCompletionEmail &&
+        !useBoundedPatientFlow
+      ) {
         try {
           const savePDF = process.env.SAVE_PDF_TO_DISK !== 'false';
           console.log(
@@ -534,7 +621,7 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
       }
 
       // Send consent PDF email if client provided consentPdfBase64 (signed Datenschutzerklärung)
-      if (!finalDraft && response.intervieweeEmail && consentPdfBase64) {
+      if (!finalDraft && response.intervieweeEmail && consentPdfBase64 && !useBoundedPatientFlow) {
         try {
           const base64Part = consentPdfBase64.includes(',')
             ? consentPdfBase64.split(',')[1]
@@ -758,7 +845,7 @@ router.put('/:id', authenticate, async (req: Request, res: Response) => {
 
     try {
       await response.save();
-      await response.populate('userId', 'email profile.firstName profile.lastName');
+      await response.populate('userId', 'email profile.firstName profile.lastName profile.examinerSignatureBase64');
 
       res.json({
         message: 'Response updated successfully',
@@ -895,7 +982,7 @@ router.post('/:id/complete', authenticate, async (req: Request, res: Response) =
 
     try {
       await response.save();
-      await response.populate('userId', 'email profile.firstName profile.lastName');
+      await response.populate('userId', 'email profile.firstName profile.lastName profile.examinerSignatureBase64');
 
       // Optional survey-response email on /complete (disabled by default).
       if (response.intervieweeEmail && shouldSendSurveyCompletionEmail) {
@@ -1004,7 +1091,13 @@ router.post('/:id/unlock', authenticate, async (req: Request, res: Response) => 
     response.lockedBy = undefined;
     response.lockedAt = undefined;
     if (response.workflowStatus !== 'closed') {
-      response.workflowStatus = response.draft ? 'patient_in_progress' : 'patient_completed';
+      if (response.draft) {
+        response.workflowStatus = 'patient_in_progress';
+      } else if (response.patientBoundedSubmit && !response.shkFollowUp?.completedAt) {
+        response.workflowStatus = 'pending_shk_followup';
+      } else {
+        response.workflowStatus = 'patient_completed';
+      }
     }
     await response.save();
 
@@ -1020,6 +1113,19 @@ router.post('/:id/close', authenticate, async (req: Request, res: Response) => {
     const response = await ResponseModel.findById(req.params.id);
     if (!response) {
       res.status(404).json({ error: 'Response not found', code: 'RESPONSE_NOT_FOUND' });
+      return;
+    }
+
+    if (
+      response.patientBoundedSubmit &&
+      !response.shkFollowUp?.completedAt
+    ) {
+      res.status(400).json({
+        error: 'Use follow-up questionnaire completion before closing this response',
+        code: 'SHK_FOLLOWUP_REQUIRED',
+        message:
+          'This record was submitted in patient mode. Complete the SHK follow-up questionnaire first.',
+      });
       return;
     }
 
@@ -1039,6 +1145,91 @@ router.post('/:id/close', authenticate, async (req: Request, res: Response) => {
     await response.save();
 
     res.json({ message: 'Response closed successfully', response });
+  } catch (error) {
+    throw error;
+  }
+});
+
+// Complete SHK follow-up (patient-bounded flow) — sends deferred consent + survey emails.
+router.post('/:id/followup/complete', authenticate, async (req: Request, res: Response) => {
+  try {
+    if (!req.params.id || req.params.id.length !== 24) {
+      res.status(400).json({
+        error: 'Invalid response ID',
+        code: 'INVALID_ID',
+      });
+      return;
+    }
+
+    const response = await ResponseModel.findById(req.params.id);
+    if (!response) {
+      res.status(404).json({ error: 'Response not found', code: 'RESPONSE_NOT_FOUND' });
+      return;
+    }
+
+    if (!response.patientBoundedSubmit) {
+      res.status(400).json({
+        error: 'Follow-up questionnaire applies only to patient-bounded responses',
+        code: 'NOT_PATIENT_BOUNDED',
+      });
+      return;
+    }
+
+    if (response.workflowStatus === 'closed' || response.shkFollowUp?.completedAt) {
+      res.status(400).json({
+        error: 'Follow-up already completed',
+        code: 'FOLLOWUP_ALREADY_DONE',
+      });
+      return;
+    }
+
+    const currentUserId = req.user!._id.toString();
+    const lockOwner =
+      !!response.lockedBy && response.lockedBy.toString() === currentUserId;
+    if (!lockOwner) {
+      res.status(403).json({
+        error: 'Lock this response before completing the follow-up questionnaire',
+        code: 'LOCK_REQUIRED',
+      });
+      return;
+    }
+
+    const allowedIds = new Set(SHK_FOLLOWUP_ITEMS.map((item) => item.id));
+    const rawAnswers =
+      typeof req.body?.answers === 'object' && req.body.answers !== null
+        ? (req.body.answers as Record<string, unknown>)
+        : {};
+    const answers: Record<string, boolean> = {};
+    for (const id of allowedIds) {
+      answers[id] = Boolean(rawAnswers[id]);
+    }
+    const unanswered = SHK_FOLLOWUP_ITEMS.filter((item) => answers[item.id] !== true);
+    if (unanswered.length > 0) {
+      res.status(400).json({
+        error: 'Alle Follow-up Punkte müssen bestätigt werden',
+        code: 'INCOMPLETE_FOLLOWUP',
+        details: unanswered.map((u) => u.id),
+      });
+      return;
+    }
+
+    response.shkFollowUp = {
+      answers,
+      completedAt: new Date(),
+    };
+    response.workflowStatus = 'closed';
+    response.closedAt = new Date();
+    response.lockedBy = undefined;
+    response.lockedAt = undefined;
+
+    await response.save();
+    await sendDeferredPatientBoundedEmails(String(response._id));
+
+    await response.populate('userId', 'email profile.firstName profile.lastName profile.examinerSignatureBase64');
+    res.json({
+      message: 'Follow-up completed; response closed and notifications sent.',
+      response,
+    });
   } catch (error) {
     throw error;
   }
@@ -1116,7 +1307,7 @@ router.get('/export/csv', authenticate, async (req: Request, res: Response) => {
     }
 
     const responses = await ResponseModel.find(filter)
-      .populate('userId', 'email profile.firstName profile.lastName')
+      .populate('userId', 'email profile.firstName profile.lastName profile.examinerSignatureBase64')
       .sort({ createdAt: -1 });
 
     const csv = buildResponseCsv(responses as any[]);
@@ -1169,7 +1360,7 @@ router.get('/:id/export/pdf', authenticate, async (req: Request, res: Response) 
     }
 
     const response = await ResponseModel.findById(req.params.id)
-      .populate('userId', 'email profile.firstName profile.lastName');
+      .populate('userId', 'email profile.firstName profile.lastName profile.examinerSignatureBase64');
 
     if (!response) {
       res.status(404).json({

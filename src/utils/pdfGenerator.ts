@@ -40,14 +40,9 @@ const QUESTION_LABELS: Record<string, string> = {
   q10: 'Photo (Optional)',
   // Step 1: General Information
   name: 'Name',
-  firstName: 'Vorname',
-  lastName: 'Nachname',
-  pid: 'Patient ID (PID)',
   email: 'Email',
   birthDate: 'Geburtsdatum (Birth Date)',
   date: 'Datum (Date)',
-  consentExplainedBy: 'Ich wurde von ___ über das ...',
-  consentDiscussionPoints: 'Zusätzlich besprochene Punkte',
   // Step 2: Current Complaints
   hasChestComplaints: 'Haben Sie derzeit Beschwerden im Brustbereich?',
   painType: 'Art der Schmerzen (Type of pain)',
@@ -98,9 +93,6 @@ const QUESTION_TYPE_LABELS: Record<string, string> = {
 };
 
 function getQuestionLabel(questionId: string, fallbackIndex: number): string {
-  if (questionId.startsWith('echoPhotos_')) {
-    return `Echokardiographie Photo ${questionId.split('_')[1] || ''}`.trim();
-  }
   return QUESTION_LABELS[questionId] || `Question ${fallbackIndex}`;
 }
 
@@ -132,6 +124,16 @@ export const generateResponsePDF = async (
       signatureBuffer = await signatureToImageBuffer(response.signatureBase64);
     } catch (e) {
       console.warn('[PDF] Signature conversion failed:', (e as Error).message);
+    }
+  }
+
+  let examinerSignatureBuffer: Buffer | null = null;
+  const examinerRaw = response.userId?.profile?.examinerSignatureBase64;
+  if (examinerRaw) {
+    try {
+      examinerSignatureBuffer = await signatureToImageBuffer(examinerRaw);
+    } catch (e) {
+      console.warn('[PDF] Examiner signature conversion failed:', (e as Error).message);
     }
   }
 
@@ -202,6 +204,20 @@ export const generateResponsePDF = async (
         doc.moveDown(1);
       }
 
+      // —— Patienteninformation —— (dedicated summary page per Cardio Check export)
+      doc.addPage();
+      doc.fontSize(16).fillColor('#1a237e').text('Patienteninformation', { align: 'center' });
+      doc.moveDown(0.3);
+      doc.fontSize(10).fillColor('#666666').text('Patient information (summary)', { align: 'center' });
+      doc.moveDown(1);
+      doc.fontSize(11).fillColor('#000000');
+      if (response.intervieweeName) doc.text(`Name: ${response.intervieweeName}`);
+      if (response.pid) doc.text(`PID: ${response.pid}`);
+      if (response.birthDate) doc.text(`Geburtsdatum: ${response.birthDate}`);
+      if (response.intervieweeEmail) doc.text(`E-Mail: ${response.intervieweeEmail}`);
+      if (response.intervieweePhone) doc.text(`Telefon: ${response.intervieweePhone}`);
+      doc.moveDown(1.2);
+
       // —— Answers ——
       if (response.answers && response.answers.length > 0) {
         doc.fontSize(13).fillColor('#333333').text('Answers', { underline: true });
@@ -222,53 +238,37 @@ export const generateResponsePDF = async (
         doc.moveDown(0.3);
       }
 
-      // —— Photo attachments (echo/documentation) ——
-      const photoAnswers = (response.answers || []).filter((a: any) => a.imageUri && String(a.imageUri).startsWith('data:image'));
-      if (photoAnswers.length > 0) {
-        doc.addPage();
-        doc.fontSize(13).fillColor('#333333').text('Photo Documentation', { underline: true });
-        doc.moveDown(0.6);
-        let y = doc.y;
-        const pageBottom = doc.page.height - 60;
-        for (let i = 0; i < photoAnswers.length; i += 1) {
-          const pa = photoAnswers[i];
-          if (y > pageBottom - 160) {
-            doc.addPage();
-            y = 60;
-          }
-          doc.fontSize(10).fillColor('#000000').text(`Photo ${i + 1}`, 50, y);
-          try {
-            const base64Data = pa.imageUri.includes(',') ? pa.imageUri.split(',')[1] : pa.imageUri;
-            const img = Buffer.from(base64Data, 'base64');
-            doc.image(img, 50, y + 14, { fit: [240, 150] });
-          } catch (e) {
-            doc.fontSize(10).fillColor('#666666').text('Could not render image', 50, y + 20);
-          }
-          y += 180;
+      // —— Signatures ——
+      doc.addPage();
+      doc.fontSize(13).fillColor('#333333').text('Signatures / Unterschriften', { underline: true });
+      doc.moveDown(1);
+      const sigY = doc.y;
+      doc.fontSize(10).fillColor('#444444').text('Patient / Patient:in', 50, sigY, { continued: false });
+      doc.fontSize(10).text('Prüfperson / Investigator', 280, sigY);
+
+      doc.y = sigY + 16;
+      const rowTop = doc.y;
+      if (signatureBuffer && signatureBuffer.length > 0) {
+        try {
+          doc.image(signatureBuffer, 50, rowTop, { fit: [200, 100] });
+        } catch (error) {
+          doc.fontSize(10).text('Patient signature unavailable', 50, rowTop);
+          console.warn('[PDF] Patient signature embed failed:', (error as Error).message);
+        }
+      } else if (response.signatureBase64) {
+        doc.fontSize(10).text('Patient signature could not be decoded', 50, rowTop);
+      }
+
+      if (examinerSignatureBuffer && examinerSignatureBuffer.length > 0) {
+        try {
+          doc.image(examinerSignatureBuffer, 280, rowTop, { fit: [200, 100] });
+        } catch (error) {
+          doc.fontSize(10).text('Investigator signature unavailable', 280, rowTop);
+          console.warn('[PDF] Examiner signature embed failed:', (error as Error).message);
         }
       }
 
-      // —— Signature ——
-      if (signatureBuffer && signatureBuffer.length > 0) {
-        doc.moveDown(0.8);
-        doc.fontSize(13).fillColor('#333333').text('Signature', { underline: true });
-        doc.moveDown(0.4);
-        doc.fillColor('#000000');
-        try {
-          doc.image(signatureBuffer, {
-            fit: [360, 160],
-            align: 'center',
-          });
-        } catch (error) {
-          console.warn('[PDF] doc.image(signature) failed:', (error as Error).message);
-          doc.fontSize(11).text('Signature image could not be displayed');
-        }
-      } else if (response.signatureBase64) {
-        doc.moveDown(0.8);
-        doc.fontSize(13).fillColor('#333333').text('Signature', { underline: true });
-        doc.moveDown(0.4);
-        doc.fontSize(11).fillColor('#000000').text('Signature image could not be displayed');
-      }
+      doc.y = rowTop + 110;
 
       doc.end();
     } catch (error) {

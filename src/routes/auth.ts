@@ -67,7 +67,27 @@ const RESET_TOKEN_EXPIRY_MS = 3600000; // 1 hour
 router.post('/register', validateRegister, async (req: Request, res: Response) => {
   console.log('[Auth] POST /register – request received');
   try {
-    const { email, password, firstName, lastName, phone, avatar, position } = req.body;
+    const {
+      email,
+      password,
+      firstName,
+      lastName,
+      phone,
+      avatar,
+      position,
+      examinerSignatureBase64,
+    } = req.body;
+    if (
+      typeof examinerSignatureBase64 !== 'string' ||
+      !examinerSignatureBase64.trim() ||
+      !examinerSignatureBase64.startsWith('data:')
+    ) {
+      res.status(400).json({
+        error: 'Examiner signature (Unterschrift Prüfperson) is required as an image/data URL.',
+        code: 'MISSING_EXAMINER_SIGNATURE',
+      });
+      return;
+    }
     console.log('[Auth] POST /register – email:', email, 'firstName:', firstName);
 
     // Check if user already exists
@@ -94,6 +114,7 @@ router.post('/register', validateRegister, async (req: Request, res: Response) =
         phone,
         avatar,
         position,
+        examinerSignatureBase64,
       },
     });
 
@@ -517,7 +538,7 @@ router.get('/me', authenticate, async (req: Request, res: Response) => {
  */
 router.put('/profile', authenticate, async (req: Request, res: Response) => {
   try {
-    const { firstName, lastName, email, phone, position } = req.body;
+    const { firstName, lastName, email, phone, position, examinerSignatureBase64 } = req.body;
 
     const user = await User.findById(req.user!._id);
     if (!user) {
@@ -579,6 +600,26 @@ router.put('/profile', authenticate, async (req: Request, res: Response) => {
     if (position !== undefined) {
       // Allow empty string to clear the field, otherwise set the value
       user.set('profile.position', position === '' ? undefined : position);
+    }
+    if (examinerSignatureBase64 !== undefined) {
+      if (
+        examinerSignatureBase64 !== null &&
+        typeof examinerSignatureBase64 === 'string' &&
+        examinerSignatureBase64.trim() &&
+        !examinerSignatureBase64.startsWith('data:')
+      ) {
+        res.status(400).json({
+          error: 'examinerSignatureBase64 must be a data:image/... payload',
+          code: 'INVALID_SIGNATURE_FORMAT',
+        });
+        return;
+      }
+      user.set(
+        'profile.examinerSignatureBase64',
+        examinerSignatureBase64 === '' || examinerSignatureBase64 === null
+          ? undefined
+          : examinerSignatureBase64
+      );
     }
 
     await user.save();
