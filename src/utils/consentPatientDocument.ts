@@ -2,8 +2,34 @@ import fs from 'fs';
 import path from 'path';
 import mammoth from 'mammoth';
 import PDFDocument from 'pdfkit';
+import { PDFDocument as PdfLibDocument } from 'pdf-lib';
 
 export const CONSENT_DOC_BASENAME = 'patienteninformation-einwilligung-erwachsene';
+
+/** Optional extra pages (e.g. missing chapter from Word export). Drop as `…-appendix.pdf` next to main PDF. */
+export function consentAppendixPdfPath(): string {
+  return path.join(consentAssetDir(), `${CONSENT_DOC_BASENAME}-appendix.pdf`);
+}
+
+async function mergeConsentAppendixIfPresent(mainPdf: Buffer): Promise<Buffer> {
+  const appendixPath = consentAppendixPdfPath();
+  if (!fs.existsSync(appendixPath)) {
+    return mainPdf;
+  }
+  try {
+    const merged = await PdfLibDocument.create();
+    const mainDoc = await PdfLibDocument.load(mainPdf);
+    const appendixDoc = await PdfLibDocument.load(fs.readFileSync(appendixPath));
+    const mainCopied = await merged.copyPages(mainDoc, mainDoc.getPageIndices());
+    mainCopied.forEach((p) => merged.addPage(p));
+    const appendixCopied = await merged.copyPages(appendixDoc, appendixDoc.getPageIndices());
+    appendixCopied.forEach((p) => merged.addPage(p));
+    return Buffer.from(await merged.save());
+  } catch (err) {
+    console.warn('[consent] Failed to merge appendix PDF; using main document only.', err);
+    return mainPdf;
+  }
+}
 
 export class ConsentDocxMissingError extends Error {
   constructor(message = 'Consent DOCX asset not found') {
@@ -90,11 +116,13 @@ export async function buildConsentHtmlDocument(name: string, dateISOOrDisplay: s
   .doc strong{font-weight:700;}
   .doc table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14px;}
   .doc td,.doc th{border:1px solid #ccc;padding:6px;text-align:left;vertical-align:top;}
+  .footnote{margin-top:22px;padding-top:12px;border-top:1px solid #ddd;font-size:12px;line-height:1.45;color:#555;}
 </style>
 </head>
 <body>
 ${banner}
 <div class="doc">${cachedHtmlBody}</div>
+<p class="footnote">Hinweis: Sollte eine Druckversion Seiten fehlen, wenden Sie sich bitte an die Studienstelle. Für den PDF-E-Mail-Versand kann auf dem Server optional eine Zusatzdatei <code>${CONSENT_DOC_BASENAME}-appendix.pdf</code> angehängt werden.</p>
 </body>
 </html>`;
 }
@@ -145,7 +173,8 @@ export async function buildConsentPdfBuffer(
 ): Promise<{ buffer: Buffer; source: 'bundled-pdf' | 'docx-text' | 'legacy-placeholder' }> {
   const bundled = consentBundledPdfPath();
   if (fs.existsSync(bundled)) {
-    return { buffer: fs.readFileSync(bundled), source: 'bundled-pdf' };
+    const merged = await mergeConsentAppendixIfPresent(fs.readFileSync(bundled));
+    return { buffer: merged, source: 'bundled-pdf' };
   }
 
   const dateShown = formatConsentBannerDate(dateISOOrDisplay);
@@ -153,7 +182,7 @@ export async function buildConsentPdfBuffer(
     await refreshDocxCache();
   } catch (e) {
     if (e instanceof ConsentDocxMissingError) {
-      const buffer = await renderLegacyConsentPdfBuffer(name, dateShown);
+      const buffer = await mergeConsentAppendixIfPresent(await renderLegacyConsentPdfBuffer(name, dateShown));
       return { buffer, source: 'legacy-placeholder' };
     }
     throw e;
@@ -175,5 +204,6 @@ export async function buildConsentPdfBuffer(
     doc.end();
   });
 
-  return { buffer, source: 'docx-text' };
+  const merged = await mergeConsentAppendixIfPresent(buffer);
+  return { buffer: merged, source: 'docx-text' };
 }
