@@ -3,6 +3,7 @@ import sharp from 'sharp';
 import { Response as ResponseModel } from '../models/Response';
 import * as fs from 'fs';
 import * as path from 'path';
+import { echoScreeningLinesForPdf, parseEchoScreeningStored } from './shkEchoScreening';
 
 /**
  * Convert signature (SVG or PNG/JPEG data URL) to a buffer PDFKit can embed.
@@ -236,6 +237,18 @@ export const generateResponsePDF = async (
           doc.moveDown(0.6);
         });
         doc.moveDown(0.3);
+      }
+
+      const echoPayload = parseEchoScreeningStored(response?.shkFollowUp?.echoScreening);
+      if (echoPayload) {
+        doc.addPage();
+        doc.fontSize(13).fillColor('#333333').text('Echo-Screening (SHK)', { underline: true });
+        doc.moveDown(0.6);
+        doc.fontSize(10).fillColor('#000000');
+        for (const line of echoScreeningLinesForPdf(echoPayload)) {
+          doc.text(line, { paragraphGap: 2 });
+        }
+        doc.moveDown(0.5);
       }
 
       // —— Signatures ——

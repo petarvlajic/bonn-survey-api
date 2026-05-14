@@ -1,5 +1,6 @@
 import mongoose, { Schema, Document } from 'mongoose';
 import { QuestionType, Answer } from '../types';
+import type { EchoScreeningPayload } from '../utils/shkEchoScreening';
 
 export interface IResponse extends Document {
   userId: mongoose.Types.ObjectId;
@@ -27,7 +28,9 @@ export interface IResponse extends Document {
   /** Consent PDF (base64) queued until SHK completes follow-up (patient-bounded flow). */
   consentPdfBase64Deferred?: string;
   shkFollowUp?: {
-    answers: Record<string, boolean>;
+    /** @deprecated Legacy checklist; new flow uses echoScreening */
+    answers?: Record<string, boolean>;
+    echoScreening?: EchoScreeningPayload;
     completedAt?: Date;
   };
   lockedBy?: mongoose.Types.ObjectId;
@@ -137,6 +140,7 @@ const ResponseSchema = new Schema<IResponse>(
       type: new Schema(
         {
           answers: { type: Schema.Types.Mixed, default: {} },
+          echoScreening: { type: Schema.Types.Mixed },
           completedAt: { type: Date },
         },
         { _id: false }

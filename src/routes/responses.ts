@@ -11,7 +11,7 @@ import { sendConsentEmailWithPdf, sendSurveyCompletionEmail } from '../utils/ema
 import { generatePid } from '../utils/pid';
 import { buildResponseCsv } from '../utils/responseExport';
 import { buildFieldChanges, verifyPostClosePin } from '../utils/audit';
-import { SHK_FOLLOWUP_ITEMS } from '../utils/shkFollowUpQuestions';
+import { parseEchoScreeningFromBody } from '../utils/shkEchoScreening';
 
 const router = express.Router();
 const TRACKED_UPDATE_FIELDS = [
@@ -1194,27 +1194,17 @@ router.post('/:id/followup/complete', authenticate, async (req: Request, res: Re
       return;
     }
 
-    const allowedIds = new Set(SHK_FOLLOWUP_ITEMS.map((item) => item.id));
-    const rawAnswers =
-      typeof req.body?.answers === 'object' && req.body.answers !== null
-        ? (req.body.answers as Record<string, unknown>)
-        : {};
-    const answers: Record<string, boolean> = {};
-    for (const id of allowedIds) {
-      answers[id] = Boolean(rawAnswers[id]);
-    }
-    const unanswered = SHK_FOLLOWUP_ITEMS.filter((item) => answers[item.id] !== true);
-    if (unanswered.length > 0) {
+    const parsedEcho = parseEchoScreeningFromBody(req.body);
+    if (!parsedEcho.ok) {
       res.status(400).json({
-        error: 'Alle Follow-up Punkte müssen bestätigt werden',
-        code: 'INCOMPLETE_FOLLOWUP',
-        details: unanswered.map((u) => u.id),
+        error: parsedEcho.error,
+        code: parsedEcho.code ?? 'ECHO_SCREENING_INVALID',
       });
       return;
     }
 
     response.shkFollowUp = {
-      answers,
+      echoScreening: parsedEcho.value,
       completedAt: new Date(),
     };
     response.workflowStatus = 'closed';

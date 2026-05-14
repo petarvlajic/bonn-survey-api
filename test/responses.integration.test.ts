@@ -24,7 +24,7 @@ vi.mock('../src/utils/email', () => ({
 }));
 
 import responsesRouter from '../src/routes/responses';
-import { SHK_FOLLOWUP_ITEMS } from '../src/utils/shkFollowUpQuestions';
+import { validEchoScreeningFixture } from '../src/utils/shkEchoScreening';
 
 describe('responses routes integration', () => {
   let mongoServer: MongoMemoryServer;
@@ -416,11 +416,11 @@ describe('responses routes integration', () => {
     expect(createRes.status).toBe(201);
     const rid = createRes.body.response._id as string;
 
-    const allTrue = Object.fromEntries(SHK_FOLLOWUP_ITEMS.map((item) => [item.id, true]));
+    const echoComplete = { echoScreening: validEchoScreeningFixture() };
     const needLock = await request(app)
       .post(`/api/responses/${rid}/followup/complete`)
       .set('x-user-id', owner)
-      .send({ answers: allTrue });
+      .send(echoComplete);
     expect(needLock.status).toBe(403);
     expect(needLock.body.code).toBe('LOCK_REQUIRED');
 
@@ -430,18 +430,22 @@ describe('responses routes integration', () => {
       .post(`/api/responses/${rid}/followup/complete`)
       .set('x-user-id', owner)
       .send({
-        answers: { [SHK_FOLLOWUP_ITEMS[0].id]: true },
+        echoScreening: {
+          main: { lv_function: 'unauffaellig' },
+          overall: 'unremarkable',
+        },
       });
     expect(partial.status).toBe(400);
-    expect(partial.body.code).toBe('INCOMPLETE_FOLLOWUP');
+    expect(partial.body.code).toBe('ECHO_MAIN_INCOMPLETE');
 
     const done = await request(app)
       .post(`/api/responses/${rid}/followup/complete`)
       .set('x-user-id', owner)
-      .send({ answers: allTrue });
+      .send(echoComplete);
     expect(done.status).toBe(200);
     expect(done.body.response.workflowStatus).toBe('closed');
     expect(done.body.response.shkFollowUp?.completedAt).toBeDefined();
+    expect(done.body.response.shkFollowUp?.echoScreening?.overall).toBe('unremarkable');
 
     const fromDb = await ResponseModel.findById(rid).lean();
     expect(fromDb?.consentPdfBase64Deferred).toBeUndefined();

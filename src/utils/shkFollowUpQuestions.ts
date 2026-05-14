@@ -1,6 +1,6 @@
 /**
- * SHK follow-up checklist after patient-bounded submission.
- * Replace labels/hints when the official Word questionnaire is finalised.
+ * @deprecated Legacy SHK checklist (5 booleans). The API now uses `echoScreening`
+ * (`src/utils/shkEchoScreening.ts`). Kept only for reference / old data in DB.
  */
 export type ShkFollowUpItem = { id: string; labelDe: string; hintDe: string };
 
