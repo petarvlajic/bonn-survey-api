@@ -1,5 +1,5 @@
 import PDFDocument from 'pdfkit';
-import { PDFDocument as PdfLibDocument } from 'pdf-lib';
+import { PDFDocument as PdfLibDocument, StandardFonts } from 'pdf-lib';
 import { buildConsentPdfBuffer, formatConsentBannerDate } from './consentPatientDocument';
 import { signatureToImageBuffer } from './signatureImage';
 
@@ -106,6 +106,47 @@ export async function buildConsentSignaturesCoverPdf(params: {
   });
 }
 
+/** UKB form last page (A4): draw names + signature images on the printed lines. */
+export async function stampSignaturesOnOfficialPdf(
+  officialPdf: Buffer,
+  params: {
+    participantSignature: Buffer | null;
+    examinerSignature: Buffer | null;
+    intervieweeName: string;
+    dateLabel: string;
+  }
+): Promise<Buffer> {
+  const doc = await PdfLibDocument.load(officialPdf);
+  const last = doc.getPages()[doc.getPageCount() - 1];
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+
+  const name = params.intervieweeName.trim();
+  if (name) {
+    last.drawText(name.toUpperCase(), { x: 72, y: 398, size: 10, font });
+  }
+  if (params.dateLabel) {
+    last.drawText(`Bonn, ${params.dateLabel}`, { x: 300, y: 338, size: 10, font });
+  }
+
+  if (params.participantSignature) {
+    const img = await doc.embedPng(params.participantSignature);
+    last.drawImage(img, { x: 72, y: 262, width: 210, height: 52 });
+  }
+  if (params.examinerSignature) {
+    const img = await doc.embedPng(params.examinerSignature);
+    last.drawImage(img, { x: 72, y: 112, width: 210, height: 52 });
+  }
+
+  return Buffer.from(await doc.save());
+}
+
+function participantSignatureRaw(doc: ResponseLikeForConsentPdf): string {
+  const direct = doc.signatureBase64?.trim();
+  if (direct) return direct;
+  const legacy = (doc as { signature?: string }).signature?.trim();
+  return legacy || '';
+}
+
 function examinerSignatureFromDoc(
   doc: ResponseLikeForConsentPdf
 ): string | undefined {
@@ -150,7 +191,7 @@ export async function buildFinalConsentEmailPdf(
 
   const examinerRaw =
     options?.examinerSignatureBase64?.trim() || examinerSignatureFromDoc(doc);
-  const participantRaw = doc.signatureBase64?.trim() || '';
+  const participantRaw = participantSignatureRaw(doc);
 
   const [participantSig, examinerSig] = await Promise.all([
     signatureToImageBuffer(participantRaw),
@@ -163,6 +204,23 @@ export async function buildFinalConsentEmailPdf(
     examinerStored: Boolean(examinerRaw),
     examinerEmbedded: Boolean(examinerSig),
   });
+
+  if (participantSig || examinerSig || name) {
+    try {
+      official = await stampSignaturesOnOfficialPdf(official, {
+        participantSignature: participantSig,
+        examinerSignature: examinerSig,
+        intervieweeName: name,
+        dateLabel,
+      });
+      console.log('[consentEmailPdf] Stamped signatures on official PDF (last page)');
+    } catch (e) {
+      console.warn(
+        '[consentEmailPdf] Could not stamp official PDF:',
+        (e as Error).message
+      );
+    }
+  }
 
   try {
     const cover = await buildConsentSignaturesCoverPdf({

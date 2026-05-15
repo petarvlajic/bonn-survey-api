@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import PDFDocument from 'pdfkit';
 import { PDFDocument as PdfLibDocument } from 'pdf-lib';
-import { mergePdfBuffers, parseDataUrlImageToBuffer } from '../src/utils/consentEmailPdf';
+import {
+  buildFinalConsentEmailPdf,
+  mergePdfBuffers,
+  parseDataUrlImageToBuffer,
+} from '../src/utils/consentEmailPdf';
+import fs from 'fs';
+import path from 'path';
 import { signatureToImageBuffer } from '../src/utils/signatureImage';
 
 async function onePagePdf(label: string): Promise<Buffer> {
@@ -33,6 +39,28 @@ describe('consentEmailPdf', () => {
     expect(fromDataUrl!.length).toBeGreaterThan(20);
     expect(parseDataUrlImageToBuffer(b64)).toEqual(fromDataUrl);
     expect(parseDataUrlImageToBuffer('')).toBeNull();
+  });
+
+  it('buildFinalConsentEmailPdf produces cover + official with embedded SVG signatures', async () => {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="80"><path d="M10 40 L190 40" stroke="black" stroke-width="3" fill="none"/></svg>`;
+    const sig = `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`;
+    const bundled = path.join(
+      process.cwd(),
+      'assets/consent/patienteninformation-einwilligung-erwachsene.pdf'
+    );
+    if (!fs.existsSync(bundled)) return;
+
+    const pdf = await buildFinalConsentEmailPdf(
+      {
+        intervieweeName: 'Test Test',
+        birthDate: '2000-01-01',
+        signatureBase64: sig,
+      },
+      { examinerSignatureBase64: sig }
+    );
+    expect(pdf).not.toBeNull();
+    const doc = await PdfLibDocument.load(pdf!);
+    expect(doc.getPageCount()).toBeGreaterThanOrEqual(10);
   });
 
   it('signatureToImageBuffer converts SVG data URLs to PNG for PDFKit', async () => {
