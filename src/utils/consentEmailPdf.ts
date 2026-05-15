@@ -1,4 +1,5 @@
 import PDFDocument from 'pdfkit';
+import sharp from 'sharp';
 import { PDFDocument as PdfLibDocument } from 'pdf-lib';
 import { buildConsentPdfBuffer, formatConsentBannerDate } from './consentPatientDocument';
 
@@ -22,6 +23,36 @@ export function parseDataUrlImageToBuffer(input: string | undefined | null): Buf
     const buf = Buffer.from(base64Part, 'base64');
     return buf.length > 0 ? buf : null;
   } catch {
+    return null;
+  }
+}
+
+function dataUrlMime(input: string): string | null {
+  const m = /^data:([^;,]+)/i.exec(input.trim());
+  return m ? m[1].toLowerCase() : null;
+}
+
+/**
+ * PDFKit only embeds PNG/JPEG. App signatures are SVG (`data:image/svg+xml;base64,...`).
+ */
+export async function imageBufferForPdfEmbedding(
+  input: string | undefined | null
+): Promise<Buffer | null> {
+  const raw = parseDataUrlImageToBuffer(input);
+  if (!raw) return null;
+
+  const mime = typeof input === 'string' ? dataUrlMime(input) : null;
+  const looksLikeSvg =
+    mime === 'image/svg+xml' ||
+    (raw.length > 4 && raw.subarray(0, 5).toString('utf8').trimStart().startsWith('<'));
+
+  try {
+    if (looksLikeSvg) {
+      return await sharp(raw, { density: 150 }).png().toBuffer();
+    }
+    return await sharp(raw).png().toBuffer();
+  } catch (e) {
+    console.warn('[consentEmailPdf] imageBufferForPdfEmbedding failed:', (e as Error).message);
     return null;
   }
 }
@@ -58,7 +89,12 @@ export async function buildConsentSignaturesCoverPdf(params: {
 
     doc.fontSize(14).text('Herz Check Bonn – Einwilligung', { underline: true });
     doc.moveDown(0.6);
-    doc.fontSize(10).fillColor('#333').text('Unterschriftenblatt (Teil 1). Anschließend folgt die vollständige Patienteninformation und Einwilligungserklärung (offizielles UKB-Dokument).');
+    doc
+      .fontSize(10)
+      .fillColor('#333')
+      .text(
+        'Unterschriftenblatt (Teil 1). Anschließend folgt die vollständige Patienteninformation und Einwilligungserklärung (offizielles UKB-Dokument).'
+      );
     doc.moveDown(1);
 
     doc.fontSize(11).text(`Name der teilnehmenden Person: ${intervieweeName || '—'}`);
@@ -111,15 +147,17 @@ export async function buildFinalConsentEmailPdf(doc: ResponseLikeForConsentPdf):
   const dateLabel = formatConsentBannerDate(rawDate);
 
   let official: Buffer;
+  let pdfSource: string;
   try {
-    const { buffer } = await buildConsentPdfBuffer(name, rawDate);
-    official = buffer;
+    const built = await buildConsentPdfBuffer(name, rawDate);
+    official = built.buffer;
+    pdfSource = built.source;
+    console.log(`[consentEmailPdf] Official document source: ${pdfSource}`);
   } catch (e) {
     console.error('[consentEmailPdf] Failed to build official consent PDF:', (e as Error).message);
     return null;
   }
 
-  const participantSig = parseDataUrlImageToBuffer(doc.signatureBase64);
   const examinerProfile =
     doc.userId &&
     typeof doc.userId === 'object' &&
@@ -127,7 +165,11 @@ export async function buildFinalConsentEmailPdf(doc: ResponseLikeForConsentPdf):
     'profile' in doc.userId
       ? (doc.userId as { profile?: { examinerSignatureBase64?: string } }).profile
       : undefined;
-  const examinerSig = parseDataUrlImageToBuffer(examinerProfile?.examinerSignatureBase64);
+
+  const [participantSig, examinerSig] = await Promise.all([
+    imageBufferForPdfEmbedding(doc.signatureBase64),
+    imageBufferForPdfEmbedding(examinerProfile?.examinerSignatureBase64),
+  ]);
 
   try {
     const cover = await buildConsentSignaturesCoverPdf({
@@ -136,9 +178,16 @@ export async function buildFinalConsentEmailPdf(doc: ResponseLikeForConsentPdf):
       participantSignature: participantSig,
       examinerSignature: examinerSig,
     });
-    return await mergePdfBuffers(cover, official);
+    const merged = await mergePdfBuffers(cover, official);
+    console.log(
+      `[consentEmailPdf] Merged PDF: cover + ${pdfSource}, pages≈${(await PdfLibDocument.load(merged)).getPageCount()}`
+    );
+    return merged;
   } catch (e) {
-    console.error('[consentEmailPdf] Failed to merge cover + official, falling back to official only:', (e as Error).message);
+    console.error(
+      '[consentEmailPdf] Failed to merge cover + official, falling back to official only:',
+      (e as Error).message
+    );
     return official;
   }
 }

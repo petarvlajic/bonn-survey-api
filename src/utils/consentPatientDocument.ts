@@ -38,8 +38,9 @@ export class ConsentDocxMissingError extends Error {
   }
 }
 
+/** Stable path regardless of pm2 `cwd` (dist/utils → project root/assets/consent). */
 function consentAssetDir(): string {
-  return path.join(process.cwd(), 'assets', 'consent');
+  return path.resolve(__dirname, '..', '..', 'assets', 'consent');
 }
 
 export function consentDocxPath(): string {
@@ -174,8 +175,10 @@ export async function buildConsentPdfBuffer(
   const bundled = consentBundledPdfPath();
   if (fs.existsSync(bundled)) {
     const merged = await mergeConsentAppendixIfPresent(fs.readFileSync(bundled));
+    console.log(`[consent] Using bundled official PDF: ${bundled} (${merged.length} bytes)`);
     return { buffer: merged, source: 'bundled-pdf' };
   }
+  console.warn(`[consent] Bundled PDF not found at ${bundled}; falling back to DOCX text export`);
 
   const dateShown = formatConsentBannerDate(dateISOOrDisplay);
   try {

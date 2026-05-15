@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import PDFDocument from 'pdfkit';
 import { PDFDocument as PdfLibDocument } from 'pdf-lib';
-import { mergePdfBuffers, parseDataUrlImageToBuffer } from '../src/utils/consentEmailPdf';
+import {
+  imageBufferForPdfEmbedding,
+  mergePdfBuffers,
+  parseDataUrlImageToBuffer,
+} from '../src/utils/consentEmailPdf';
 
 async function onePagePdf(label: string): Promise<Buffer> {
   return new Promise((resolve, reject) => {
@@ -32,5 +36,13 @@ describe('consentEmailPdf', () => {
     expect(fromDataUrl!.length).toBeGreaterThan(20);
     expect(parseDataUrlImageToBuffer(b64)).toEqual(fromDataUrl);
     expect(parseDataUrlImageToBuffer('')).toBeNull();
+  });
+
+  it('imageBufferForPdfEmbedding converts SVG data URLs to PNG for PDFKit', async () => {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50"><path d="M10 25 L90 25" stroke="black" stroke-width="2" fill="none"/></svg>`;
+    const dataUrl = `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`;
+    const png = await imageBufferForPdfEmbedding(dataUrl);
+    expect(png).not.toBeNull();
+    expect(png!.subarray(0, 8).toString('hex')).toBe('89504e470d0a1a0a'); // PNG magic
   });
 });
