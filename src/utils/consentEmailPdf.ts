@@ -1,7 +1,7 @@
 import PDFDocument from 'pdfkit';
-import sharp from 'sharp';
 import { PDFDocument as PdfLibDocument } from 'pdf-lib';
 import { buildConsentPdfBuffer, formatConsentBannerDate } from './consentPatientDocument';
+import { signatureToImageBuffer } from './signatureImage';
 
 export interface ResponseLikeForConsentPdf {
   intervieweeName?: string;
@@ -11,6 +11,11 @@ export interface ResponseLikeForConsentPdf {
   /** Populated user doc with `profile.examinerSignatureBase64`, or an ObjectId before populate. */
   userId?: unknown;
 }
+
+export type BuildFinalConsentEmailPdfOptions = {
+  /** SHK examiner signature (patient-bounded flow: use completing SHK, not response.userId). */
+  examinerSignatureBase64?: string | null;
+};
 
 /** Strip data URL prefix and return raw bytes, or null if missing/invalid. */
 export function parseDataUrlImageToBuffer(input: string | undefined | null): Buffer | null {
@@ -23,36 +28,6 @@ export function parseDataUrlImageToBuffer(input: string | undefined | null): Buf
     const buf = Buffer.from(base64Part, 'base64');
     return buf.length > 0 ? buf : null;
   } catch {
-    return null;
-  }
-}
-
-function dataUrlMime(input: string): string | null {
-  const m = /^data:([^;,]+)/i.exec(input.trim());
-  return m ? m[1].toLowerCase() : null;
-}
-
-/**
- * PDFKit only embeds PNG/JPEG. App signatures are SVG (`data:image/svg+xml;base64,...`).
- */
-export async function imageBufferForPdfEmbedding(
-  input: string | undefined | null
-): Promise<Buffer | null> {
-  const raw = parseDataUrlImageToBuffer(input);
-  if (!raw) return null;
-
-  const mime = typeof input === 'string' ? dataUrlMime(input) : null;
-  const looksLikeSvg =
-    mime === 'image/svg+xml' ||
-    (raw.length > 4 && raw.subarray(0, 5).toString('utf8').trimStart().startsWith('<'));
-
-  try {
-    if (looksLikeSvg) {
-      return await sharp(raw, { density: 150 }).png().toBuffer();
-    }
-    return await sharp(raw).png().toBuffer();
-  } catch (e) {
-    console.warn('[consentEmailPdf] imageBufferForPdfEmbedding failed:', (e as Error).message);
     return null;
   }
 }
@@ -131,12 +106,27 @@ export async function buildConsentSignaturesCoverPdf(params: {
   });
 }
 
+function examinerSignatureFromDoc(
+  doc: ResponseLikeForConsentPdf
+): string | undefined {
+  const profile =
+    doc.userId &&
+    typeof doc.userId === 'object' &&
+    doc.userId !== null &&
+    'profile' in doc.userId
+      ? (doc.userId as { profile?: { examinerSignatureBase64?: string } }).profile
+      : undefined;
+  return profile?.examinerSignatureBase64;
+}
+
 /**
  * Final PDF for consent email: signature cover (participant + examiner) first,
- * then the official Patienteninformation / Einwilligung document from server assets (DOCX→PDF pipeline).
- * Does not use the client-generated “template” PDF.
+ * then the official Patienteninformation / Einwilligung document from server assets.
  */
-export async function buildFinalConsentEmailPdf(doc: ResponseLikeForConsentPdf): Promise<Buffer | null> {
+export async function buildFinalConsentEmailPdf(
+  doc: ResponseLikeForConsentPdf,
+  options?: BuildFinalConsentEmailPdfOptions
+): Promise<Buffer | null> {
   const name = (doc.intervieweeName || '').trim();
   const rawDate =
     doc.birthDate && String(doc.birthDate).trim()
@@ -158,18 +148,21 @@ export async function buildFinalConsentEmailPdf(doc: ResponseLikeForConsentPdf):
     return null;
   }
 
-  const examinerProfile =
-    doc.userId &&
-    typeof doc.userId === 'object' &&
-    doc.userId !== null &&
-    'profile' in doc.userId
-      ? (doc.userId as { profile?: { examinerSignatureBase64?: string } }).profile
-      : undefined;
+  const examinerRaw =
+    options?.examinerSignatureBase64?.trim() || examinerSignatureFromDoc(doc);
+  const participantRaw = doc.signatureBase64?.trim() || '';
 
   const [participantSig, examinerSig] = await Promise.all([
-    imageBufferForPdfEmbedding(doc.signatureBase64),
-    imageBufferForPdfEmbedding(examinerProfile?.examinerSignatureBase64),
+    signatureToImageBuffer(participantRaw),
+    signatureToImageBuffer(examinerRaw),
   ]);
+
+  console.log('[consentEmailPdf] Signatures:', {
+    participantStored: Boolean(participantRaw),
+    participantEmbedded: Boolean(participantSig),
+    examinerStored: Boolean(examinerRaw),
+    examinerEmbedded: Boolean(examinerSig),
+  });
 
   try {
     const cover = await buildConsentSignaturesCoverPdf({
@@ -179,9 +172,8 @@ export async function buildFinalConsentEmailPdf(doc: ResponseLikeForConsentPdf):
       examinerSignature: examinerSig,
     });
     const merged = await mergePdfBuffers(cover, official);
-    console.log(
-      `[consentEmailPdf] Merged PDF: cover + ${pdfSource}, pages≈${(await PdfLibDocument.load(merged)).getPageCount()}`
-    );
+    const pageCount = (await PdfLibDocument.load(merged)).getPageCount();
+    console.log(`[consentEmailPdf] Merged PDF: cover + ${pdfSource}, pages=${pageCount}`);
     return merged;
   } catch (e) {
     console.error(

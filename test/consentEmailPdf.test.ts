@@ -1,11 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import PDFDocument from 'pdfkit';
 import { PDFDocument as PdfLibDocument } from 'pdf-lib';
-import {
-  imageBufferForPdfEmbedding,
-  mergePdfBuffers,
-  parseDataUrlImageToBuffer,
-} from '../src/utils/consentEmailPdf';
+import { mergePdfBuffers, parseDataUrlImageToBuffer } from '../src/utils/consentEmailPdf';
+import { signatureToImageBuffer } from '../src/utils/signatureImage';
 
 async function onePagePdf(label: string): Promise<Buffer> {
   return new Promise((resolve, reject) => {
@@ -38,10 +35,10 @@ describe('consentEmailPdf', () => {
     expect(parseDataUrlImageToBuffer('')).toBeNull();
   });
 
-  it('imageBufferForPdfEmbedding converts SVG data URLs to PNG for PDFKit', async () => {
+  it('signatureToImageBuffer converts SVG data URLs to PNG for PDFKit', async () => {
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50"><path d="M10 25 L90 25" stroke="black" stroke-width="2" fill="none"/></svg>`;
     const dataUrl = `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`;
-    const png = await imageBufferForPdfEmbedding(dataUrl);
+    const png = await signatureToImageBuffer(dataUrl);
     expect(png).not.toBeNull();
     expect(png!.subarray(0, 8).toString('hex')).toBe('89504e470d0a1a0a'); // PNG magic
   });

@@ -1,5 +1,6 @@
 import express, { Request, Response } from 'express';
 import { Response as ResponseModel } from '../models/Response';
+import { User } from '../models/User';
 import { authenticate } from '../middleware/auth';
 import { generateResponsePDF } from '../utils/pdfGenerator';
 import {
@@ -43,7 +44,10 @@ function parseBase64Payload(input: string): Buffer | null {
 /**
  * Sends consent PDF + survey completion emails for patient-bounded flows (after SHK follow-up).
  */
-async function sendDeferredPatientBoundedEmails(responseId: string): Promise<void> {
+async function sendDeferredPatientBoundedEmails(
+  responseId: string,
+  completingShkUserId?: string
+): Promise<void> {
   const doc = await ResponseModel.findById(responseId).populate(
     'userId',
     'email profile.firstName profile.lastName profile.examinerSignatureBase64'
@@ -53,7 +57,15 @@ async function sendDeferredPatientBoundedEmails(responseId: string): Promise<voi
     return;
   }
 
-  const mergedConsent = await buildFinalConsentEmailPdf(doc);
+  let examinerSignatureBase64: string | undefined;
+  if (completingShkUserId) {
+    const shk = await User.findById(completingShkUserId).select('profile.examinerSignatureBase64');
+    examinerSignatureBase64 = shk?.profile?.examinerSignatureBase64;
+  }
+
+  const mergedConsent = await buildFinalConsentEmailPdf(doc, {
+    examinerSignatureBase64,
+  });
   const consentBufFallback = parseBase64Payload(String(doc.consentPdfBase64Deferred || ''));
   const consentBuf = mergedConsent ?? consentBufFallback;
   if (consentBuf) {
@@ -628,7 +640,10 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
       // Consent email: server-built PDF = Unterschriftenblatt + official UKB document (not the client HTML template PDF).
       if (!finalDraft && response.intervieweeEmail && consentPdfBase64 && !useBoundedPatientFlow) {
         try {
-          const mergedConsent = await buildFinalConsentEmailPdf(response);
+          const mergedConsent = await buildFinalConsentEmailPdf(response, {
+            examinerSignatureBase64: (req.user as { profile?: { examinerSignatureBase64?: string } })
+              ?.profile?.examinerSignatureBase64,
+          });
           const base64Part = consentPdfBase64.includes(',')
             ? consentPdfBase64.split(',')[1]
             : consentPdfBase64;
@@ -1220,7 +1235,7 @@ router.post('/:id/followup/complete', authenticate, async (req: Request, res: Re
     response.lockedAt = undefined;
 
     await response.save();
-    await sendDeferredPatientBoundedEmails(String(response._id));
+    await sendDeferredPatientBoundedEmails(String(response._id), String(req.user!._id));
 
     await response.populate('userId', 'email profile.firstName profile.lastName profile.examinerSignatureBase64');
     res.json({

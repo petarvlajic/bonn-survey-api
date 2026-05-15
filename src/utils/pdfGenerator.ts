@@ -1,27 +1,9 @@
 import PDFDocument from 'pdfkit';
-import sharp from 'sharp';
 import { Response as ResponseModel } from '../models/Response';
 import * as fs from 'fs';
 import * as path from 'path';
 import { echoScreeningLinesForPdf, parseEchoScreeningStored } from './shkEchoScreening';
-
-/**
- * Convert signature (SVG or PNG/JPEG data URL) to a buffer PDFKit can embed.
- * PDFKit does not support SVG; the app sends data:image/svg+xml;base64,... so we convert to PNG.
- */
-async function signatureToImageBuffer(signatureBase64: string): Promise<Buffer> {
-  const isDataUrl = signatureBase64.includes(',');
-  const mimeAndBase64 = signatureBase64.split(',')[0] || '';
-  const base64Data = isDataUrl ? signatureBase64.split(',')[1] : signatureBase64;
-  const buffer = Buffer.from(base64Data, 'base64');
-
-  if (mimeAndBase64.includes('svg')) {
-    return sharp(buffer, { density: 150 })
-      .png()
-      .toBuffer();
-  }
-  return buffer;
-}
+import { signatureToImageBuffer } from './signatureImage';
 
 /**
  * Hardcoded labels — must match mobile app (Step1–Step7 + FormScreen q1–q10).
