@@ -3,8 +3,10 @@ import PDFDocument from 'pdfkit';
 import { PDFDocument as PdfLibDocument } from 'pdf-lib';
 import {
   buildFinalConsentEmailPdf,
+  consentSignaturePageIndex,
   mergePdfBuffers,
   parseDataUrlImageToBuffer,
+  stampSignaturesOnOfficialPdf,
 } from '../src/utils/consentEmailPdf';
 import fs from 'fs';
 import path from 'path';
@@ -41,7 +43,34 @@ describe('consentEmailPdf', () => {
     expect(parseDataUrlImageToBuffer('')).toBeNull();
   });
 
-  it('buildFinalConsentEmailPdf produces cover + official with embedded SVG signatures', async () => {
+  it('consentSignaturePageIndex targets page before trailing blank footer', () => {
+    expect(consentSignaturePageIndex(9)).toBe(7);
+    expect(consentSignaturePageIndex(1)).toBe(0);
+  });
+
+  it('stampSignaturesOnOfficialPdf uses signature page (8), not blank page 9', async () => {
+    const bundled = path.join(
+      process.cwd(),
+      'assets/consent/patienteninformation-einwilligung-erwachsene.pdf'
+    );
+    if (!fs.existsSync(bundled)) return;
+
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="80"><path d="M10 40 L190 40" stroke="black" stroke-width="3" fill="none"/></svg>`;
+    const sig = `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`;
+    const participantSig = await signatureToImageBuffer(sig);
+    const official = fs.readFileSync(bundled);
+    const stamped = await stampSignaturesOnOfficialPdf(official, {
+      participantSignature: participantSig,
+      examinerSignature: participantSig,
+      intervieweeName: 'Test Test',
+      examinerName: 'Petar Vlajic',
+      dateLabel: '15.05.2026',
+    });
+    const doc = await PdfLibDocument.load(stamped);
+    expect(doc.getPageCount()).toBe(8);
+  });
+
+  it('buildFinalConsentEmailPdf stamps official document with embedded SVG signatures', async () => {
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="80"><path d="M10 40 L190 40" stroke="black" stroke-width="3" fill="none"/></svg>`;
     const sig = `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`;
     const bundled = path.join(
@@ -60,7 +89,7 @@ describe('consentEmailPdf', () => {
     );
     expect(pdf).not.toBeNull();
     const doc = await PdfLibDocument.load(pdf!);
-    expect(doc.getPageCount()).toBeGreaterThanOrEqual(10);
+    expect(doc.getPageCount()).toBe(8);
   });
 
   it('signatureToImageBuffer converts SVG data URLs to PNG for PDFKit', async () => {

@@ -58,13 +58,21 @@ async function sendDeferredPatientBoundedEmails(
   }
 
   let examinerSignatureBase64: string | undefined;
+  let examinerName: string | undefined;
   if (completingShkUserId) {
-    const shk = await User.findById(completingShkUserId).select('profile.examinerSignatureBase64');
+    const shk = await User.findById(completingShkUserId).select(
+      'profile.firstName profile.lastName profile.examinerSignatureBase64'
+    );
     examinerSignatureBase64 = shk?.profile?.examinerSignatureBase64;
+    examinerName = [shk?.profile?.firstName, shk?.profile?.lastName]
+      .filter(Boolean)
+      .join(' ')
+      .trim();
   }
 
   const mergedConsent = await buildFinalConsentEmailPdf(doc, {
     examinerSignatureBase64,
+    examinerName,
   });
   const consentBufFallback = parseBase64Payload(String(doc.consentPdfBase64Deferred || ''));
   const consentBuf = mergedConsent ?? consentBufFallback;
