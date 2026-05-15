@@ -29,8 +29,8 @@ const UserSchema = new Schema<IUser>(
       lowercase: true,
       trim: true,
       validate: {
-        validator: (email: string) => email.endsWith('@ukbonn.de'),
-        message: 'Email must end with @ukbonn.de',
+        validator: (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email).trim().toLowerCase()),
+        message: 'Invalid email address',
       },
     },
     password: {

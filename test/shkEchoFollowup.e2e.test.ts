@@ -308,4 +308,72 @@ describe('SHK echo follow-up (HTTP e2e)', () => {
     const docYes = await PDFDocument.load(withEcho);
     expect(docYes.getPageCount()).toBe(docNo.getPageCount() + 1);
   });
+
+  /**
+   * Single end-to-end chain: tablet patient submission (bounded) → SHK locks record →
+   * SHK completes Echo follow-up (closes case). Other tests in this file cover edge cases in isolation.
+   */
+  describe('Full combined flow (patient bounded → SHK lock → follow-up)', () => {
+    it('chains POST create → pending_shk_followup → POST lock → POST followup/complete → closed', async () => {
+      if (!mongoReady) {
+        expect(true).toBe(true);
+        return;
+      }
+      const owner = new mongoose.Types.ObjectId().toString();
+      const tinyPng =
+        'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+      const createRes = await request(app)
+        .post('/api/responses')
+        .set('x-user-id', owner)
+        .send({
+          answers: [{ questionId: 'chiefComplaint', type: 'TEXT', value: 'Bounded tablet interview (E2E chain).' }],
+          draft: false,
+          status: 'completed',
+          boundedPatientSubmit: true,
+          pid: 'HZB-E2E-FULL-01',
+          birthDate: '1992-08-21',
+          consentPdfBase64: 'data:application/pdf;base64,QUJDCg==',
+          intervieweeName: 'E2E Chain Patient',
+          intervieweeEmail: 'e2e.chain.patient@example.com',
+          signature: tinyPng,
+        });
+
+      expect(createRes.status).toBe(201);
+      const created = createRes.body.response;
+      const rid = created._id as string;
+      expect(created.patientBoundedSubmit).toBe(true);
+      expect(created.workflowStatus).toBe('pending_shk_followup');
+      expect(created.draft).toBe(false);
+
+      const lockRes = await request(app).post(`/api/responses/${rid}/lock`).set('x-user-id', owner);
+      expect(lockRes.status).toBe(200);
+      expect(lockRes.body.message).toBe('Response locked');
+      expect(lockRes.body.response.workflowStatus).toBe('shk_in_progress');
+      expect(lockRes.body.response.lockedBy).toBeTruthy();
+
+      const echo = validEchoScreeningFixture();
+      echo.main.aortic_valve = 'auffaellig';
+      echo.optional.pericardial_effusion = true;
+      echo.overall = 'needs_followup';
+
+      const done = await request(app)
+        .post(`/api/responses/${rid}/followup/complete`)
+        .set('x-user-id', owner)
+        .send({ echoScreening: echo });
+
+      expect(done.status).toBe(200);
+      expect(done.body.message).toMatch(/Follow-up completed/i);
+      expect(done.body.response.workflowStatus).toBe('closed');
+      expect(done.body.response.shkFollowUp?.echoScreening?.main?.aortic_valve).toBe('auffaellig');
+      expect(done.body.response.shkFollowUp?.echoScreening?.optional?.pericardial_effusion).toBe(true);
+      expect(done.body.response.shkFollowUp?.echoScreening?.overall).toBe('needs_followup');
+      expect(done.body.response.shkFollowUp?.completedAt).toBeTruthy();
+
+      const getRes = await request(app).get(`/api/responses/${rid}`).set('x-user-id', owner);
+      expect(getRes.status).toBe(200);
+      expect(getRes.body.response.workflowStatus).toBe('closed');
+      expect(getRes.body.response.patientBoundedSubmit).toBe(true);
+    });
+  });
 });

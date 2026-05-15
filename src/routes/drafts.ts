@@ -4,6 +4,13 @@ import { authenticate } from '../middleware/auth';
 
 const router = express.Router();
 
+function draftUserIdString(userId: unknown): string {
+  if (userId && typeof userId === 'object' && '_id' in (userId as Record<string, unknown>)) {
+    return String((userId as { _id: unknown })._id);
+  }
+  return String(userId);
+}
+
 // Get all drafts
 router.get('/', authenticate, async (req: Request, res: Response) => {
   try {
@@ -49,8 +56,8 @@ router.get('/:id', authenticate, async (req: Request, res: Response) => {
       return;
     }
 
-    // Check if user owns the draft
-    if (draft.userId.toString() !== req.user!._id) {
+    // Check if user owns the draft (userId may be populated — do not use .toString() on the document)
+    if (draftUserIdString(draft.userId) !== req.user!._id) {
       res.status(403).json({
         error: 'Forbidden: You can only view your own drafts',
         code: 'FORBIDDEN',

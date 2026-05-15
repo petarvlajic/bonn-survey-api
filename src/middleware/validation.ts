@@ -1,13 +1,17 @@
 import { Request, Response, NextFunction } from 'express';
-import { ApiError } from '../types';
 
 const WEAK_PASSWORD_MESSAGE =
   'Password must be at least 8 characters and contain uppercase, lowercase, number and special character';
 
-export const validateEmail = (email: string): boolean => {
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  return emailRegex.test(email) && email.endsWith('@ukbonn.de');
-};
+const EMAIL_FORMAT = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Any plausible email (patient / personal accounts). */
+export const isValidEmailFormat = (email: string): boolean =>
+  typeof email === 'string' && EMAIL_FORMAT.test(email.trim().toLowerCase());
+
+/** UK Bonn staff mailbox (SHK / interviewer registration). */
+export const isUkbonnStaffEmail = (email: string): boolean =>
+  isValidEmailFormat(email) && email.trim().toLowerCase().endsWith('@ukbonn.de');
 
 export function validatePasswordStrength(password: string): { valid: boolean; error?: string } {
   if (password.length < 8) {
@@ -33,7 +37,7 @@ export const validateRegister = (
   res: Response,
   next: NextFunction
 ): void => {
-  const { email, password, firstName, lastName } = req.body;
+  const { email, password, firstName, lastName, registrationAccountType } = req.body;
 
   if (!email || !password || !firstName || !lastName) {
     console.log('[Auth] validateRegister – 400 Missing required fields');
@@ -45,10 +49,22 @@ export const validateRegister = (
     return;
   }
 
-  if (!validateEmail(email)) {
-    console.log('[Auth] validateRegister – 400 Invalid email (not @ukbonn.de):', email);
+  const accountType: 'patient' | 'staff' =
+    registrationAccountType === 'patient' ? 'patient' : 'staff';
+
+  if (accountType === 'patient') {
+    if (!isValidEmailFormat(email)) {
+      console.log('[Auth] validateRegister – 400 Invalid email (patient):', email);
+      res.status(400).json({
+        error: 'Invalid email address',
+        code: 'INVALID_EMAIL',
+      });
+      return;
+    }
+  } else if (!isUkbonnStaffEmail(email)) {
+    console.log('[Auth] validateRegister – 400 Invalid email (staff, not @ukbonn.de):', email);
     res.status(400).json({
-      error: 'Email must end with @ukbonn.de',
+      error: 'Staff accounts must use an @ukbonn.de email address',
       code: 'INVALID_EMAIL',
     });
     return;
@@ -84,4 +100,3 @@ export const validateLogin = (
 
   next();
 };
-

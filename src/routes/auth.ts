@@ -4,7 +4,7 @@ import mongoose from 'mongoose';
 import { User } from '../models/User';
 import { hashPassword, comparePassword } from '../utils/password';
 import { generateToken } from '../utils/jwt';
-import { validateRegister, validateLogin, validatePasswordStrength } from '../middleware/validation';
+import { validateRegister, validateLogin, validatePasswordStrength, isValidEmailFormat } from '../middleware/validation';
 import { authenticate } from '../middleware/auth';
 import { requireAdmin } from '../middleware/requireAdmin';
 import { sendPasswordResetEmail } from '../utils/email';
@@ -42,7 +42,11 @@ function parseAdminEmailSet(): Set<string> {
  *               email:
  *                 type: string
  *                 format: email
- *                 description: Must end with @ukbonn.de
+ *                 description: Any valid email when registrationAccountType is patient; staff must use @ukbonn.de (default type is staff)
+ *               registrationAccountType:
+ *                 type: string
+ *                 enum: [patient, staff]
+ *                 description: Optional; defaults to staff (SHK)
  *               password:
  *                 type: string
  *                 minLength: 6
@@ -578,11 +582,10 @@ router.put('/profile', authenticate, async (req: Request, res: Response) => {
 
     // Update email if provided and different
     if (email && email !== user.email) {
-      // Validate email format and domain
-      if (!email.endsWith('@ukbonn.de')) {
+      if (!isValidEmailFormat(email)) {
         res.status(400).json({
-          error: 'Email must end with @ukbonn.de',
-          code: 'INVALID_EMAIL_DOMAIN',
+          error: 'Invalid email address',
+          code: 'INVALID_EMAIL',
         });
         return;
       }

@@ -36,7 +36,7 @@ const swaggerDefinition: SwaggerDefinition = {
           email: {
             type: 'string',
             format: 'email',
-            description: 'User email (must end with @ukbonn.de)',
+            description: 'User email (any valid address; staff typically @ukbonn.de)',
           },
           profile: {
             type: 'object',

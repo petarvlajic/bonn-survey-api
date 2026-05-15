@@ -8,6 +8,7 @@ import {
   ConsentDocxMissingError,
 } from '../utils/consentPatientDocument';
 import { sendConsentEmailWithPdf, sendSurveyCompletionEmail } from '../utils/email';
+import { buildFinalConsentEmailPdf } from '../utils/consentEmailPdf';
 import { generatePid } from '../utils/pid';
 import { buildResponseCsv } from '../utils/responseExport';
 import { buildFieldChanges, verifyPostClosePin } from '../utils/audit';
@@ -52,7 +53,9 @@ async function sendDeferredPatientBoundedEmails(responseId: string): Promise<voi
     return;
   }
 
-  const consentBuf = parseBase64Payload(String(doc.consentPdfBase64Deferred || ''));
+  const mergedConsent = await buildFinalConsentEmailPdf(doc);
+  const consentBufFallback = parseBase64Payload(String(doc.consentPdfBase64Deferred || ''));
+  const consentBuf = mergedConsent ?? consentBufFallback;
   if (consentBuf) {
     try {
       await sendConsentEmailWithPdf(
@@ -61,12 +64,14 @@ async function sendDeferredPatientBoundedEmails(responseId: string): Promise<voi
         doc.birthDate,
         consentBuf
       );
-      console.log(`[API] Deferred consent email sent to ${doc.intervieweeEmail}`);
+      console.log(
+        `[API] Deferred consent email sent to ${doc.intervieweeEmail} (${mergedConsent ? 'server-merged UKB PDF' : 'legacy client PDF'})`
+      );
     } catch (consentErr: unknown) {
       console.error('[API] Deferred consent email failed:', (consentErr as Error).message);
     }
   } else {
-    console.log('[API] Deferred consent skipped: no stored consentPdfBase64Deferred');
+    console.log('[API] Deferred consent skipped: could not build merged PDF and no stored consentPdfBase64Deferred');
   }
 
   if (shouldSendSurveyCompletionEmail) {
@@ -620,15 +625,17 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
           console.log(`[API] Skip survey email: SEND_SURVEY_COMPLETION_EMAIL not enabled.`);
       }
 
-      // Send consent PDF email if client provided consentPdfBase64 (signed Datenschutzerklärung)
+      // Consent email: server-built PDF = Unterschriftenblatt + official UKB document (not the client HTML template PDF).
       if (!finalDraft && response.intervieweeEmail && consentPdfBase64 && !useBoundedPatientFlow) {
         try {
+          const mergedConsent = await buildFinalConsentEmailPdf(response);
           const base64Part = consentPdfBase64.includes(',')
             ? consentPdfBase64.split(',')[1]
             : consentPdfBase64;
-          const consentBuffer = Buffer.from(base64Part, 'base64');
+          const consentBufferFallback = Buffer.from(base64Part, 'base64');
+          const consentBuffer = mergedConsent ?? consentBufferFallback;
           console.log(
-            `[API] Sending consent PDF email to ${response.intervieweeEmail} for response ${response._id}...`
+            `[API] Sending consent PDF email to ${response.intervieweeEmail} for response ${response._id} (${mergedConsent ? 'server-merged' : 'client fallback'})...`
           );
           await sendConsentEmailWithPdf(
             response.intervieweeEmail,

@@ -8,7 +8,7 @@
     "dev": "nodemon --exec ts-node src/index.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "vitest run test/shkEchoFollowup.e2e.test.ts"
+    "test:e2e": "vitest run test/shkEchoFollowup.e2e.test.ts test/auth.integration.test.ts test/surveysDraftsUsers.integration.test.ts test/responses.integration.test.ts"
   },
   "author": "",
   "license": "ISC",
