@@ -31,17 +31,17 @@ export function consentSignaturePageIndex(pageCount: number): number {
  * Layout y = position of the printed horizontal rule; helpers offset text/signatures onto it.
  */
 const UKB_SIGNATURE_LAYOUT = {
-  participantName: { x: 78, y: 698, size: 11 },
+  participantName: { x: 78, y: 698, size: 11, baselineFraction: 0.7 },
   participantDate: { x: 78, y: 628, size: 10 },
-  participantSignature: { x: 325, y: 632, width: 235, height: 48, lift: 0.5 },
+  participantSignature: { x: 325, y: 632, width: 200, height: 40, lift: 0.5 },
   examinerName: { x: 78, y: 560, size: 11 },
   examinerDate: { x: 78, y: 472, size: 10 },
-  examinerSignature: { x: 325, y: 528, width: 235, height: 48, lift: 0.5 },
+  examinerSignature: { x: 325, y: 528, width: 200, height: 40, lift: 0.5 },
 } as const;
 
-/** Raise text baseline ~50% of font size so the rule sits under the text, not through it. */
-function textBaselineY(lineY: number, fontSize: number): number {
-  return lineY + Math.round(fontSize * 0.5);
+/** Raise text baseline above the rule (fraction of font size). */
+function textBaselineY(lineY: number, fontSize: number, baselineFraction = 0.5): number {
+  return lineY + Math.round(fontSize * baselineFraction);
 }
 
 /** Lift signature image upward (fraction of image height) so ink sits on the rule. */
@@ -163,7 +163,11 @@ export async function stampSignaturesOnOfficialPdf(
   if (participantName) {
     page.drawText(participantName.toUpperCase(), {
       x: L.participantName.x,
-      y: textBaselineY(L.participantName.y, L.participantName.size),
+      y: textBaselineY(
+        L.participantName.y,
+        L.participantName.size,
+        L.participantName.baselineFraction
+      ),
       size: L.participantName.size,
       font,
     });
