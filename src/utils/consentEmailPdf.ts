@@ -31,12 +31,12 @@ export function consentSignaturePageIndex(pageCount: number): number {
  * Layout y = position of the printed horizontal rule; helpers offset text/signatures onto it.
  */
 const UKB_SIGNATURE_LAYOUT = {
-  participantName: { x: 78, y: 712, size: 11 },
+  participantName: { x: 78, y: 698, size: 11 },
   participantDate: { x: 78, y: 628, size: 10 },
-  participantSignature: { x: 325, y: 632, width: 235, height: 48 },
-  examinerName: { x: 78, y: 552, size: 11 },
+  participantSignature: { x: 325, y: 632, width: 235, height: 48, lift: 0.5 },
+  examinerName: { x: 78, y: 560, size: 11 },
   examinerDate: { x: 78, y: 472, size: 10 },
-  examinerSignature: { x: 325, y: 476, width: 235, height: 48 },
+  examinerSignature: { x: 325, y: 528, width: 235, height: 48, lift: 0.5 },
 } as const;
 
 /** Raise text baseline ~50% of font size so the rule sits under the text, not through it. */
@@ -44,9 +44,9 @@ function textBaselineY(lineY: number, fontSize: number): number {
   return lineY + Math.round(fontSize * 0.5);
 }
 
-/** Place signature image so the stroke sits on the rule (bottom edge of image ≈ line). */
-function signatureBottomY(lineY: number): number {
-  return lineY;
+/** Lift signature image upward (fraction of image height) so ink sits on the rule. */
+function signatureBottomY(lineY: number, imageHeight: number, liftFraction: number): number {
+  return lineY + Math.round(imageHeight * liftFraction);
 }
 
 /** Strip data URL prefix and return raw bytes, or null if missing/invalid. */
@@ -196,7 +196,7 @@ export async function stampSignaturesOnOfficialPdf(
     const s = L.participantSignature;
     page.drawImage(img, {
       x: s.x,
-      y: signatureBottomY(s.y),
+      y: signatureBottomY(s.y, s.height, s.lift),
       width: s.width,
       height: s.height,
     });
@@ -206,7 +206,7 @@ export async function stampSignaturesOnOfficialPdf(
     const s = L.examinerSignature;
     page.drawImage(img, {
       x: s.x,
-      y: signatureBottomY(s.y),
+      y: signatureBottomY(s.y, s.height, s.lift),
       width: s.width,
       height: s.height,
     });
