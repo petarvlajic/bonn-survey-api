@@ -26,15 +26,28 @@ export function consentSignaturePageIndex(pageCount: number): number {
   return Math.max(0, pageCount - 1);
 }
 
-/** A4 UKB export (page 8 of 9): pdf-lib coords, origin bottom-left (calibrated on bundled PDF). */
+/**
+ * A4 UKB export (page 8 of 9): pdf-lib coords, origin bottom-left.
+ * Layout y = position of the printed horizontal rule; helpers offset text/signatures onto it.
+ */
 const UKB_SIGNATURE_LAYOUT = {
-  participantName: { x: 78, y: 702, size: 11 },
-  participantDate: { x: 78, y: 582, size: 10 },
-  participantSignature: { x: 325, y: 570, width: 235, height: 50 },
-  examinerName: { x: 78, y: 508, size: 11 },
-  examinerDate: { x: 78, y: 418, size: 10 },
-  examinerSignature: { x: 325, y: 405, width: 235, height: 50 },
+  participantName: { x: 78, y: 712, size: 11 },
+  participantDate: { x: 78, y: 628, size: 10 },
+  participantSignature: { x: 325, y: 632, width: 235, height: 48 },
+  examinerName: { x: 78, y: 552, size: 11 },
+  examinerDate: { x: 78, y: 472, size: 10 },
+  examinerSignature: { x: 325, y: 476, width: 235, height: 48 },
 } as const;
+
+/** Raise text baseline ~50% of font size so the rule sits under the text, not through it. */
+function textBaselineY(lineY: number, fontSize: number): number {
+  return lineY + Math.round(fontSize * 0.5);
+}
+
+/** Place signature image so the stroke sits on the rule (bottom edge of image ≈ line). */
+function signatureBottomY(lineY: number): number {
+  return lineY;
+}
 
 /** Strip data URL prefix and return raw bytes, or null if missing/invalid. */
 export function parseDataUrlImageToBuffer(input: string | undefined | null): Buffer | null {
@@ -150,14 +163,14 @@ export async function stampSignaturesOnOfficialPdf(
   if (participantName) {
     page.drawText(participantName.toUpperCase(), {
       x: L.participantName.x,
-      y: L.participantName.y,
+      y: textBaselineY(L.participantName.y, L.participantName.size),
       size: L.participantName.size,
       font,
     });
   }
   page.drawText(placeDate, {
     x: L.participantDate.x,
-    y: L.participantDate.y,
+    y: textBaselineY(L.participantDate.y, L.participantDate.size),
     size: L.participantDate.size,
     font,
   });
@@ -166,14 +179,14 @@ export async function stampSignaturesOnOfficialPdf(
   if (examinerName) {
     page.drawText(examinerName, {
       x: L.examinerName.x,
-      y: L.examinerName.y,
+      y: textBaselineY(L.examinerName.y, L.examinerName.size),
       size: L.examinerName.size,
       font,
     });
   }
   page.drawText(placeDate, {
     x: L.examinerDate.x,
-    y: L.examinerDate.y,
+    y: textBaselineY(L.examinerDate.y, L.examinerDate.size),
     size: L.examinerDate.size,
     font,
   });
@@ -181,12 +194,22 @@ export async function stampSignaturesOnOfficialPdf(
   if (params.participantSignature) {
     const img = await doc.embedPng(params.participantSignature);
     const s = L.participantSignature;
-    page.drawImage(img, { x: s.x, y: s.y, width: s.width, height: s.height });
+    page.drawImage(img, {
+      x: s.x,
+      y: signatureBottomY(s.y),
+      width: s.width,
+      height: s.height,
+    });
   }
   if (params.examinerSignature) {
     const img = await doc.embedPng(params.examinerSignature);
     const s = L.examinerSignature;
-    page.drawImage(img, { x: s.x, y: s.y, width: s.width, height: s.height });
+    page.drawImage(img, {
+      x: s.x,
+      y: signatureBottomY(s.y),
+      width: s.width,
+      height: s.height,
+    });
   }
 
   // Drop trailing blank page (footer-only) from Word export when present.

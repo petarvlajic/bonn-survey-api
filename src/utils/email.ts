@@ -87,6 +87,62 @@ const buildConsentPdfPassword = (
   return `${initials}${year}`;
 };
 
+function consentEmailPasswordHintDe(
+  password: string | null
+): string {
+  if (password) {
+    return (
+      `Das angehängte PDF ist passwortgeschützt. Ihr Passwort lautet: <strong>${password}</strong> ` +
+      '(Schema: Initialen von Vor- und Nachname plus Geburtsjahr, z. B. TT2000).'
+    );
+  }
+  return (
+    'Das angehängte PDF ist passwortgeschützt. Das Passwort setzt sich aus den Initialen ' +
+    'Ihres Vor- und Nachnamens und Ihrem Geburtsjahr zusammen (z. B. TT2000).'
+  );
+}
+
+function consentEmailPasswordHintDePlain(password: string | null): string {
+  if (password) {
+    return (
+      `Das angehängte PDF ist passwortgeschützt. Ihr Passwort lautet: ${password} ` +
+      '(Schema: Initialen von Vor- und Nachname plus Geburtsjahr, z. B. TT2000).'
+    );
+  }
+  return (
+    'Das angehängte PDF ist passwortgeschützt. Das Passwort setzt sich aus den Initialen ' +
+    'Ihres Vor- und Nachnamens und Ihrem Geburtsjahr zusammen (z. B. TT2000).'
+  );
+}
+
+function consentEmailPasswordHintEn(
+  password: string | null
+): string {
+  if (password) {
+    return (
+      `The attached PDF is password-protected. Your password is: <strong>${password}</strong> ` +
+      '(format: initials of first and last name plus year of birth, e.g. TT2000).'
+    );
+  }
+  return (
+    'The attached PDF is password-protected. The password is built from the initials of ' +
+    'your first and last name and your year of birth (e.g. TT2000).'
+  );
+}
+
+function consentEmailPasswordHintEnPlain(password: string | null): string {
+  if (password) {
+    return (
+      `The attached PDF is password-protected. Your password is: ${password} ` +
+      '(format: initials of first and last name plus year of birth, e.g. TT2000).'
+    );
+  }
+  return (
+    'The attached PDF is password-protected. The password is built from the initials of ' +
+    'your first and last name and your year of birth (e.g. TT2000).'
+  );
+}
+
 /**
  * Send survey completion email with PDF attachment
  */
@@ -200,15 +256,13 @@ export const sendConsentEmailWithPdf = async (
   const pdfToSend =
     password != null ? await encryptPdfBufferWithPassword(pdfBuffer, password) : pdfBuffer;
 
-  const subject = 'Herz Check Bonn – Einwilligung (Consent PDF)';
-
-  const passwordLine = password
-    ? `Šifra za otključavanje PDF-a (pattern: inicijali + godina rođenja) je: ${password} (npr. MM1985).`
-    : 'Šifra za otključavanje PDF-a prati pattern: inicijali + godina rođenja (npr. MM1985).';
+  const subject = 'Herz Check Bonn – Einwilligung';
+  const nameDe = recipientName || 'Teilnehmer/in';
+  const nameEn = recipientName || 'participant';
 
   const html = `
     <!DOCTYPE html>
-    <html>
+    <html lang="de">
     <head>
       <meta charset="utf-8">
       <style>
@@ -216,6 +270,8 @@ export const sendConsentEmailWithPdf = async (
         .container { max-width: 600px; margin: 0 auto; padding: 20px; }
         .header { background-color: #1976d2; color: white; padding: 16px; text-align: center; border-radius: 5px 5px 0 0; }
         .content { background-color: #f9f9f9; padding: 20px; border-radius: 0 0 5px 5px; }
+        .lang-label { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: #666; margin: 0 0 8px; }
+        .divider { border: 0; border-top: 1px solid #ddd; margin: 28px 0; }
         .footer { text-align: center; margin-top: 20px; color: #666; font-size: 12px; }
       </style>
     </head>
@@ -225,13 +281,25 @@ export const sendConsentEmailWithPdf = async (
           <h1>Einwilligung – Herz Check Bonn</h1>
         </div>
         <div class="content">
-          <p>Sehr geehrte/r ${recipientName || 'Teilnehmer/in'},</p>
-          <p>im Anhang finden Sie das Dokument „Datenschutzerklärung und Einwilligungserklärung – Herz Check Bonn“ als PDF.</p>
-          <p>${passwordLine}</p>
-          <p>Mit freundlichen Grüßen<br/>Herz Check Bonn Team</p>
+          <p class="lang-label">Deutsch</p>
+          <p>Sehr geehrte/r ${nameDe},</p>
+          <p>im Anhang finden Sie die „Patienteninformation und Einwilligungserklärung“ zum Forschungsprojekt Herz Check Bonn als PDF.</p>
+          <p>${consentEmailPasswordHintDe(password)}</p>
+          <p>Bitte bewahren Sie das Dokument für Ihre Unterlagen auf.</p>
+          <p>Mit freundlichen Grüßen<br/>Ihr Herz-Check-Bonn-Team<br/>Universitätsklinikum Bonn</p>
+
+          <hr class="divider" />
+
+          <p class="lang-label">English</p>
+          <p>Dear ${nameEn},</p>
+          <p>Please find attached the patient information and declaration of consent for the Herz Check Bonn research project as a PDF.</p>
+          <p>${consentEmailPasswordHintEn(password)}</p>
+          <p>Please keep this document for your records.</p>
+          <p>Kind regards,<br/>The Herz Check Bonn team<br/>University Hospital Bonn</p>
         </div>
         <div class="footer">
-          <p>Dies ist eine automatisierte E-Mail. Bitte antworten Sie nicht auf diese Nachricht.</p>
+          <p>Dies ist eine automatisierte E-Mail. Bitte antworten Sie nicht auf diese Nachricht.<br/>
+          This is an automated message. Please do not reply.</p>
         </div>
       </div>
     </body>
@@ -239,14 +307,33 @@ export const sendConsentEmailWithPdf = async (
   `;
 
   const text = `
-Sehr geehrte/r ${recipientName || 'Teilnehmer/in'},
+Deutsch
+──────
+Sehr geehrte/r ${nameDe},
 
-im Anhang finden Sie das Dokument „Datenschutzerklärung und Einwilligungserklärung – Herz Check Bonn“ als PDF.
+im Anhang finden Sie die „Patienteninformation und Einwilligungserklärung“ zum Forschungsprojekt Herz Check Bonn als PDF.
 
-${passwordLine}
+${consentEmailPasswordHintDePlain(password)}
+
+Bitte bewahren Sie das Dokument für Ihre Unterlagen auf.
 
 Mit freundlichen Grüßen
-Herz Check Bonn Team
+Ihr Herz-Check-Bonn-Team
+Universitätsklinikum Bonn
+
+English
+───────
+Dear ${nameEn},
+
+Please find attached the patient information and declaration of consent for the Herz Check Bonn research project as a PDF.
+
+${consentEmailPasswordHintEnPlain(password)}
+
+Please keep this document for your records.
+
+Kind regards
+The Herz Check Bonn team
+University Hospital Bonn
 `.trim();
 
   await sendEmail({
