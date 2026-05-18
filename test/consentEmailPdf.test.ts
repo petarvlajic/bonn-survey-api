@@ -43,12 +43,12 @@ describe('consentEmailPdf', () => {
     expect(parseDataUrlImageToBuffer('')).toBeNull();
   });
 
-  it('consentSignaturePageIndex targets page before trailing blank footer', () => {
+  it('consentSignaturePageIndex targets page 8 of 9-page UKB export', () => {
     expect(consentSignaturePageIndex(9)).toBe(7);
     expect(consentSignaturePageIndex(1)).toBe(0);
   });
 
-  it('stampSignaturesOnOfficialPdf uses signature page (8), not blank page 9', async () => {
+  it('stampSignaturesOnOfficialPdf keeps all 9 pages and stamps page 8', async () => {
     const bundled = path.join(
       process.cwd(),
       'assets/consent/patienteninformation-einwilligung-erwachsene.pdf'
@@ -67,7 +67,7 @@ describe('consentEmailPdf', () => {
       dateLabel: '15.05.2026',
     });
     const doc = await PdfLibDocument.load(stamped);
-    expect(doc.getPageCount()).toBe(8);
+    expect(doc.getPageCount()).toBe(9);
   });
 
   it('buildFinalConsentEmailPdf stamps official document with embedded SVG signatures', async () => {
@@ -89,7 +89,7 @@ describe('consentEmailPdf', () => {
     );
     expect(pdf).not.toBeNull();
     const doc = await PdfLibDocument.load(pdf!);
-    expect(doc.getPageCount()).toBe(8);
+    expect(doc.getPageCount()).toBe(9);
   });
 
   it('signatureToImageBuffer converts SVG data URLs to PNG for PDFKit', async () => {

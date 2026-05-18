@@ -20,7 +20,7 @@ export type BuildFinalConsentEmailPdfOptions = {
   examinerName?: string | null;
 };
 
-/** UKB bundled PDF: signature block is on the page before the trailing blank footer page. */
+/** UKB bundled PDF (9 pages): signature block is on page 8 (index 7). */
 export function consentSignaturePageIndex(pageCount: number): number {
   if (pageCount >= 2) return pageCount - 2;
   return Math.max(0, pageCount - 1);
@@ -31,7 +31,8 @@ export function consentSignaturePageIndex(pageCount: number): number {
  * Layout y = position of the printed horizontal rule; helpers offset text/signatures onto it.
  */
 const UKB_SIGNATURE_LAYOUT = {
-  participantName: { x: 78, y: 698, size: 11, baselineFraction: 0.7 },
+  /** y ≈ +5% vs prior calibration so name sits slightly higher on the rule line */
+  participantName: { x: 78, y: 733, size: 11, baselineFraction: 0.7 },
   participantDate: { x: 78, y: 628, size: 10 },
   participantSignature: { x: 325, y: 632, width: 200, height: 40, lift: 0.5 },
   examinerName: { x: 78, y: 560, size: 11 },
@@ -140,7 +141,7 @@ export async function buildConsentSignaturesCoverPdf(params: {
 
 /**
  * Stamp participant + examiner names, dates, and signatures onto the UKB signature page
- * (second-to-last page in the bundled 9-page export; last page is blank except footer).
+ * (page 8 in the bundled 9-page UKB export; all pages are kept in the email PDF).
  */
 export async function stampSignaturesOnOfficialPdf(
   officialPdf: Buffer,
@@ -216,15 +217,6 @@ export async function stampSignaturesOnOfficialPdf(
     });
   }
 
-  // Drop trailing blank page (footer-only) from Word export when present.
-  if (doc.getPageCount() >= 2) {
-    const trailing = doc.getPages()[doc.getPageCount() - 1];
-    const { height } = trailing.getSize();
-    if (pageIndex === doc.getPageCount() - 2 && height > 0) {
-      doc.removePage(doc.getPageCount() - 1);
-    }
-  }
-
   return Buffer.from(await doc.save());
 }
 
@@ -280,7 +272,7 @@ function consentSigningDateIso(doc: ResponseLikeForConsentPdf): string {
 }
 
 /**
- * Final PDF for consent email: official UKB Patienteninformation with signatures on page 8.
+ * Final PDF for consent email: full 9-page UKB Patienteninformation with signatures on page 8.
  */
 export async function buildFinalConsentEmailPdf(
   doc: ResponseLikeForConsentPdf,
