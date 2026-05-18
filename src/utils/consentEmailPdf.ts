@@ -32,7 +32,7 @@ export function consentSignaturePageIndex(pageCount: number): number {
  */
 const UKB_SIGNATURE_LAYOUT = {
   /** Between consent heading (~698 too high) and Ort/Datum row (~632 too low) on 9-page UKB export. */
-  participantName: { x: 78, y: 668, size: 11, baselineFraction: 0.55 },
+  participantName: { x: 78, y: 663, size: 11, baselineFraction: 0.55 },
   participantDate: { x: 78, y: 628, size: 10 },
   participantSignature: { x: 325, y: 632, width: 200, height: 40, lift: 0.5 },
   examinerName: { x: 78, y: 560, size: 11 },
