@@ -31,8 +31,8 @@ export function consentSignaturePageIndex(pageCount: number): number {
  * Layout y = position of the printed horizontal rule; helpers offset text/signatures onto it.
  */
 const UKB_SIGNATURE_LAYOUT = {
-  /** y ≈ +5% vs prior calibration so name sits slightly higher on the rule line */
-  participantName: { x: 78, y: 733, size: 11, baselineFraction: 0.7 },
+  /** Aligned with participant signature row on current 9-page UKB export (was 698 on older layout). */
+  participantName: { x: 78, y: 632, size: 11, baselineFraction: 0.5 },
   participantDate: { x: 78, y: 628, size: 10 },
   participantSignature: { x: 325, y: 632, width: 200, height: 40, lift: 0.5 },
   examinerName: { x: 78, y: 560, size: 11 },
