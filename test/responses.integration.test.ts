@@ -4,6 +4,7 @@ import request from 'supertest';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import { Response as ResponseModel } from '../src/models/Response';
+import { DeletedResponseArchive } from '../src/models/DeletedResponseArchive';
 import '../src/models/User';
 
 vi.mock('../src/middleware/auth', () => ({
@@ -47,6 +48,7 @@ describe('responses routes integration', () => {
   afterEach(async () => {
     if (!mongoReady) return;
     await ResponseModel.deleteMany({});
+    await DeletedResponseArchive.deleteMany({});
     delete process.env.POST_CLOSE_EDIT_PIN;
   });
 
@@ -474,6 +476,62 @@ describe('responses routes integration', () => {
       .set('x-user-id', ownerStr);
     expect(unlockRes.status).toBe(200);
     expect(unlockRes.body.response.workflowStatus).toBe('pending_shk_followup');
+  });
+
+  it('hard-deletes response and archives pid with deletion reason', async () => {
+    if (!mongoReady) {
+      expect(true).toBe(true);
+      return;
+    }
+    const owner = new mongoose.Types.ObjectId();
+    const resp = await ResponseModel.create({
+      userId: owner,
+      pid: 'HZB202605TEST',
+      draft: false,
+      patientBoundedSubmit: true,
+      workflowStatus: 'pending_shk_followup',
+      answers: [{ questionId: 'q', type: 'TEXT', value: 'v' }],
+      intervieweeEmail: 'del@example.com',
+      intervieweeName: 'Delete Me',
+    });
+
+    const delRes = await request(app)
+      .delete(`/api/responses/${resp._id}`)
+      .set('x-user-id', owner.toString())
+      .send({ deletionReason: 'Duplicate entry' });
+    expect(delRes.status).toBe(200);
+    expect(delRes.body.archivedPid).toBe('HZB202605TEST');
+
+    const gone = await ResponseModel.findById(resp._id);
+    expect(gone).toBeNull();
+
+    const archive = await DeletedResponseArchive.findOne({
+      originalResponseId: resp._id,
+    }).lean();
+    expect(archive?.pid).toBe('HZB202605TEST');
+    expect(archive?.deletionReason).toBe('Duplicate entry');
+  });
+
+  it('rejects delete without deletion reason', async () => {
+    if (!mongoReady) {
+      expect(true).toBe(true);
+      return;
+    }
+    const owner = new mongoose.Types.ObjectId();
+    const resp = await ResponseModel.create({
+      userId: owner,
+      draft: false,
+      workflowStatus: 'patient_completed',
+      answers: [],
+      intervieweeEmail: 'x@example.com',
+      intervieweeName: 'X',
+    });
+    const delRes = await request(app)
+      .delete(`/api/responses/${resp._id}`)
+      .set('x-user-id', owner.toString())
+      .send({});
+    expect(delRes.status).toBe(400);
+    expect(delRes.body.code).toBe('DELETION_REASON_REQUIRED');
   });
 });
 

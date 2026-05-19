@@ -1,6 +1,8 @@
 import express, { Request, Response } from 'express';
 import { Response as ResponseModel } from '../models/Response';
+import { DeletedResponseArchive } from '../models/DeletedResponseArchive';
 import { User } from '../models/User';
+import { isStaffEmail } from '../utils/staffAccess';
 import { authenticate } from '../middleware/auth';
 import { generateResponsePDF } from '../utils/pdfGenerator';
 import {
@@ -16,6 +18,40 @@ import { buildFieldChanges, verifyPostClosePin } from '../utils/audit';
 import { parseEchoScreeningFromBody } from '../utils/shkEchoScreening';
 
 const router = express.Router();
+function buildWorkflowBucketFilter(bucket: string): Record<string, unknown> | null {
+  if (bucket === 'pending') {
+    return {
+      workflowStatus: { $ne: 'closed' },
+      $or: [
+        { workflowStatus: { $in: ['pending_shk_followup', 'shk_in_progress'] } },
+        {
+          workflowStatus: 'patient_completed',
+          patientBoundedSubmit: true,
+          $or: [
+            { 'shkFollowUp.completedAt': { $exists: false } },
+            { 'shkFollowUp.completedAt': null },
+          ],
+        },
+      ],
+    };
+  }
+  if (bucket === 'done') {
+    return {
+      $or: [
+        { workflowStatus: 'closed' },
+        {
+          workflowStatus: 'patient_completed',
+          $or: [
+            { patientBoundedSubmit: { $ne: true } },
+            { 'shkFollowUp.completedAt': { $exists: true, $ne: null } },
+          ],
+        },
+      ],
+    };
+  }
+  return null;
+}
+
 const TRACKED_UPDATE_FIELDS = [
   'answers',
   'signatureBase64',
@@ -236,6 +272,7 @@ router.get('/', authenticate, async (req: Request, res: Response) => {
       userId,
       draft,
       workflowStatus,
+      workflowBucket,
       pid,
       search,
       completedAtFrom,
@@ -258,6 +295,12 @@ router.get('/', authenticate, async (req: Request, res: Response) => {
     }
     if (workflowStatus) {
       filter.workflowStatus = workflowStatus;
+    }
+    if (workflowBucket && typeof workflowBucket === 'string') {
+      const bucketFilter = buildWorkflowBucketFilter(workflowBucket);
+      if (bucketFilter) {
+        Object.assign(filter, bucketFilter);
+      }
     }
     if (pid) {
       filter.pid = pid;
@@ -742,11 +785,18 @@ router.put('/:id', authenticate, async (req: Request, res: Response) => {
     const currentUserId = req.user!._id;
     const isOwner = response.userId.toString() === currentUserId;
     const hasShkLock = !!response.lockedBy && response.lockedBy.toString() === currentUserId;
-    if (!isOwner && !hasShkLock) {
+    const staff = isStaffEmail(req.user!.email);
+    const staffMayEditPatientCase =
+      staff &&
+      response.patientBoundedSubmit &&
+      ['pending_shk_followup', 'patient_completed', 'shk_in_progress'].includes(
+        response.workflowStatus
+      );
+    if (!isOwner && !hasShkLock && !staffMayEditPatientCase) {
       res.status(403).json({
         error: 'Access denied',
         code: 'FORBIDDEN',
-        message: 'You can only update your own responses or locked SHK responses.',
+        message: 'You can only update your own responses, locked SHK responses, or open patient cases as staff.',
         hint: 'Lock the response first or use your own response.',
       });
       return;
@@ -931,22 +981,71 @@ router.delete('/:id', authenticate, async (req: Request, res: Response) => {
       return;
     }
 
-    // Check if user owns the response
-    if (response.userId.toString() !== req.user!._id) {
-      res.status(403).json({
-        error: 'Access denied',
-        code: 'FORBIDDEN',
-        message: 'You can only delete your own responses.',
-        hint: 'Please use a response that belongs to your account.',
+    const { deletionReason } = req.body ?? {};
+    if (
+      !deletionReason ||
+      typeof deletionReason !== 'string' ||
+      !deletionReason.trim()
+    ) {
+      res.status(400).json({
+        error: 'Deletion reason is required',
+        code: 'DELETION_REASON_REQUIRED',
+        message: 'Please provide a reason for deleting this record.',
       });
       return;
     }
+
+    const currentUserId = req.user!._id;
+    const isOwner = response.userId.toString() === String(currentUserId);
+    const hasShkLock =
+      !!response.lockedBy && response.lockedBy.toString() === String(currentUserId);
+    const staff = isStaffEmail(req.user!.email);
+    if (!isOwner && !staff) {
+      res.status(403).json({
+        error: 'Access denied',
+        code: 'FORBIDDEN',
+        message: 'Only the owner or UKB staff can delete responses.',
+      });
+      return;
+    }
+    if (!isOwner && staff && !hasShkLock && response.workflowStatus === 'shk_in_progress') {
+      const lockedByOther =
+        response.lockedBy && response.lockedBy.toString() !== String(currentUserId);
+      if (lockedByOther) {
+        res.status(403).json({
+          error: 'Response is locked by another user',
+          code: 'LOCKED_BY_OTHER',
+        });
+        return;
+      }
+    }
+
+    const reasonTrimmed = deletionReason.trim();
+    await DeletedResponseArchive.create({
+      originalResponseId: response._id,
+      pid: response.pid,
+      deletionReason: reasonTrimmed,
+      deletedBy: currentUserId,
+      deletedAt: new Date(),
+      intervieweeName: response.intervieweeName,
+      intervieweeEmail: response.intervieweeEmail,
+      workflowStatusAtDelete: response.workflowStatus,
+      snapshot: response.toObject(),
+    });
+
+    console.log('[API] Response deleted (archived)', {
+      responseId: response._id.toString(),
+      pid: response.pid,
+      deletedBy: req.user!.email,
+      reason: reasonTrimmed.slice(0, 120),
+    });
 
     await ResponseModel.findByIdAndDelete(req.params.id);
 
     res.json({
       message: 'Response deleted successfully',
       code: 'DELETE_SUCCESS',
+      archivedPid: response.pid ?? null,
     });
   } catch (error) {
     throw error;
@@ -1282,6 +1381,7 @@ router.get('/export/csv', authenticate, async (req: Request, res: Response) => {
       userId,
       draft,
       workflowStatus,
+      workflowBucket,
       pid,
       search,
       completedAtFrom,
@@ -1300,6 +1400,12 @@ router.get('/export/csv', authenticate, async (req: Request, res: Response) => {
     }
     if (workflowStatus) {
       filter.workflowStatus = workflowStatus;
+    }
+    if (workflowBucket && typeof workflowBucket === 'string') {
+      const bucketFilter = buildWorkflowBucketFilter(workflowBucket);
+      if (bucketFilter) {
+        Object.assign(filter, bucketFilter);
+      }
     }
     if (pid) {
       filter.pid = pid;

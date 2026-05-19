@@ -323,9 +323,9 @@
                 <div>
                     <label>Status:</label>
                     <select id="statusFilter" onchange="loadResponses()">
-                        <option value="">All</option>
-                        <option value="true">Draft</option>
-                        <option value="false">Completed</option>
+                        <option value="pending" selected>Ausstehend</option>
+                        <option value="done">Erledigt</option>
+                        <option value="">Alle</option>
                     </select>
                 </div>
                 <div>
@@ -354,8 +354,8 @@
                         <th onclick="sortTable('_id')">ID</th>
                         <th onclick="sortTable('userId')">Interviewer</th>
                         <th onclick="sortTable('intervieweeName')">Interviewee Name</th>
-                        <th onclick="sortTable('surveyId')">Survey Title</th>
-                        <th onclick="sortTable('draft')">Status</th>
+                        <th onclick="sortTable('pid')">PID</th>
+                        <th onclick="sortTable('workflowStatus')">Status</th>
                         <th onclick="sortTable('createdAt')">Created At</th>
                         <th onclick="sortTable('completedAt')">Completed At</th>
                         <th>Signature</th>
@@ -467,7 +467,7 @@
             if (!token) return;
 
             const search = document.getElementById('searchInput').value;
-            const status = document.getElementById('statusFilter').value;
+            const workflowBucket = document.getElementById('statusFilter').value;
             const dateFrom = document.getElementById('dateFrom').value;
             const dateTo = document.getElementById('dateTo').value;
 
@@ -483,7 +483,7 @@
                     sortOrder: currentSortOrder,
                 });
 
-                if (status) params.append('draft', status);
+                if (workflowBucket) params.append('workflowBucket', workflowBucket);
                 if (dateFrom) params.append('completedAtFrom', dateFrom);
                 if (dateTo) params.append('completedAtTo', dateTo);
 
@@ -538,15 +538,16 @@
                     <td>${response._id.substring(0, 8)}...</td>
                     <td>${interviewer}</td>
                     <td>${response.intervieweeName || 'N/A'}</td>
-                    <td>${response.surveyId?.title || 'N/A'}</td>
-                    <td><span class="status-badge ${response.draft ? 'status-draft' : 'status-completed'}">${response.draft ? 'Draft' : 'Completed'}</span></td>
+                    <td>${response.pid || '—'}</td>
+                    <td><span class="status-badge">${response.workflowStatus || (response.draft ? 'draft' : 'completed')}</span></td>
                     <td>${new Date(response.createdAt).toLocaleString()}</td>
                     <td>${response.completedAt ? new Date(response.completedAt).toLocaleString() : 'N/A'}</td>
                     <td>${response.signatureBase64 ? 'Yes' : 'No'}</td>
                     <td>
                         <button class="btn-primary" onclick="viewResponse('${response._id}')" style="padding: 5px 10px; font-size: 12px;">View</button>
+                        <button class="btn-primary" onclick="editResponse('${response._id}')" style="padding: 5px 10px; font-size: 12px;">Edit</button>
                         <button class="btn-success" onclick="exportPDF('${response._id}')" style="padding: 5px 10px; font-size: 12px;">PDF</button>
-                        <button class="btn-danger" onclick="deleteResponse('${response._id}')" style="padding: 5px 10px; font-size: 12px;">Delete</button>
+                        <button class="btn-danger" onclick="deleteResponse('${response._id}', '${(response.intervieweeName || '').replace(/'/g, "\\'")}', '${(response.pid || '').replace(/'/g, "\\'")}')" style="padding: 5px 10px; font-size: 12px;">Delete</button>
                     </td>
                 `;
                 tbody.appendChild(row);
@@ -667,15 +668,66 @@
             }
         }
 
-        async function deleteResponse(id) {
-            if (!confirm('Are you sure you want to delete this response?')) return;
+        async function editResponse(id) {
+            const record = allResponses.find((r) => r._id === id);
+            if (!record) return;
+            const intervieweeName = prompt('Interviewee name', record.intervieweeName || '');
+            if (intervieweeName === null) return;
+            const intervieweeEmail = prompt('Interviewee email', record.intervieweeEmail || '');
+            if (intervieweeEmail === null) return;
+            const changeReason = record.workflowStatus === 'closed'
+                ? prompt('Reason for change (required for closed records)', '')
+                : '';
+            if (record.workflowStatus === 'closed' && !(changeReason || '').trim()) {
+                alert('Reason is required for closed records.');
+                return;
+            }
+            const body = {
+                intervieweeName: intervieweeName.trim(),
+                intervieweeEmail: intervieweeEmail.trim(),
+            };
+            if (changeReason && changeReason.trim()) body.changeReason = changeReason.trim();
+            if (record.workflowStatus === 'closed') {
+                const editPin = prompt('Edit PIN (required for closed records)', '');
+                if (!editPin) return;
+                body.editPin = editPin;
+            }
+            try {
+                const response = await fetch(`${API_BASE}/api/responses/${id}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(body),
+                });
+                if (response.ok) loadResponses();
+                else {
+                    const data = await response.json();
+                    alert(data.error || 'Failed to update response');
+                }
+            } catch (error) {
+                alert('Network error: ' + error.message);
+            }
+        }
+
+        async function deleteResponse(id, intervieweeName, pid) {
+            const label = intervieweeName || pid || id;
+            if (!confirm(`Möchten Sie „${label}“ wirklich endgültig löschen? Diese Aktion kann nicht rückgängig gemacht werden.`)) return;
+            const deletionReason = prompt('Grund der Löschung (Pflicht):');
+            if (!deletionReason || !deletionReason.trim()) {
+                alert('Grund der Löschung ist erforderlich.');
+                return;
+            }
 
             try {
                 const response = await fetch(`${API_BASE}/api/responses/${id}`, {
                     method: 'DELETE',
                     headers: {
-                        'Authorization': `Bearer ${token}`
-                    }
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ deletionReason: deletionReason.trim() }),
                 });
 
                 if (response.ok) {
@@ -712,14 +764,21 @@
                 return;
             }
 
-            if (!confirm(`Are you sure you want to delete ${selectedIds.size} response(s)?`)) return;
+            if (!confirm(`Möchten Sie wirklich ${selectedIds.size} Datensatz/Datensätze endgültig löschen?`)) return;
+            const deletionReason = prompt('Grund der Löschung (Pflicht, gilt für alle ausgewählten):');
+            if (!deletionReason || !deletionReason.trim()) {
+                alert('Grund der Löschung ist erforderlich.');
+                return;
+            }
 
             const promises = Array.from(selectedIds).map(id => 
                 fetch(`${API_BASE}/api/responses/${id}`, {
                     method: 'DELETE',
                     headers: {
-                        'Authorization': `Bearer ${token}`
-                    }
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ deletionReason: deletionReason.trim() }),
                 })
             );
 
