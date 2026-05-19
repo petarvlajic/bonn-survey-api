@@ -16,6 +16,27 @@ interface EmailOptions {
 /** Same SMTP env as consent/survey PDF emails (SMTP_HOST, SMTP_USER, SMTP_PASS, …). */
 export const isSmtpConfigured = (): boolean => Boolean(process.env.SMTP_HOST);
 
+const maskSecretInUrl = (url: string): string =>
+  url.replace(/token=([^&]+)/i, (_, value: string) => {
+    const raw = decodeURIComponent(value);
+    const hint = raw.length > 8 ? `${raw.slice(0, 8)}…` : '…';
+    return `token=${encodeURIComponent(hint)}`;
+  });
+
+export const logSmtpDiagnostics = (context: string): void => {
+  const port = process.env.SMTP_PORT || '587';
+  const useSecure = process.env.SMTP_SECURE === 'true' || port === '465';
+  console.log(`[API] [email] [${context}] SMTP diagnostics`, {
+    host: process.env.SMTP_HOST || '(unset)',
+    port,
+    secure: useSecure,
+    userSet: Boolean(process.env.SMTP_USER),
+    passSet: Boolean(process.env.SMTP_PASS),
+    from: process.env.SMTP_FROM || process.env.SMTP_USER || 'noreply@ukbonn.de (default)',
+    configured: isSmtpConfigured(),
+  });
+};
+
 // Create transporter based on environment variables (Strato: port 465 + SSL)
 const createTransporter = () => {
   const port = parseInt(process.env.SMTP_PORT || '587', 10);
@@ -46,9 +67,14 @@ const createTransporter = () => {
 /**
  * Send email with optional PDF attachment (SMTP).
  */
-export const sendEmail = async (options: EmailOptions): Promise<void> => {
+export const sendEmail = async (
+  options: EmailOptions,
+  logContext = 'generic'
+): Promise<void> => {
   try {
-    console.log(`[API] [email] Connecting to SMTP (${process.env.SMTP_HOST}:${process.env.SMTP_PORT}) and sending to ${options.to}...`);
+    console.log(
+      `[API] [email] [${logContext}] Connecting to SMTP (${process.env.SMTP_HOST}:${process.env.SMTP_PORT}) → ${options.to}, subject="${options.subject}"`
+    );
     const transporter = createTransporter();
     const mailOptions = {
       from: process.env.SMTP_FROM || process.env.SMTP_USER || 'noreply@ukbonn.de',
@@ -59,9 +85,19 @@ export const sendEmail = async (options: EmailOptions): Promise<void> => {
       attachments: options.attachments,
     };
     const info = await transporter.sendMail(mailOptions);
-    console.log('✅ Email sent successfully:', info.messageId);
+    console.log(`[API] [email] [${logContext}] sent OK`, {
+      messageId: info.messageId,
+      accepted: info.accepted,
+      rejected: info.rejected,
+      response: info.response,
+    });
   } catch (error: any) {
-    console.error('❌ Error sending email:', error);
+    console.error(`[API] [email] [${logContext}] send failed`, {
+      message: error?.message,
+      code: error?.code,
+      responseCode: error?.responseCode,
+      command: error?.command,
+    });
     throw new Error(`Failed to send email: ${error.message}`);
   }
 };
@@ -359,6 +395,16 @@ University Hospital Bonn
  * Link opens the app: ukbonnsurvey://reset-password?token=…
  */
 export const sendPasswordResetEmail = async (to: string, resetToken: string): Promise<void> => {
+  const tokenHint =
+    resetToken.length > 8 ? `${resetToken.slice(0, 8)}…(${resetToken.length} chars)` : '(short)';
+
+  logSmtpDiagnostics('password-reset');
+  console.log('[API] [email] [password-reset] preparing mail', {
+    to,
+    tokenHint,
+    nodeEnv: process.env.NODE_ENV || '(unset)',
+  });
+
   const scheme = (process.env.RESET_PASSWORD_APP_SCHEME || 'ukbonnsurvey').replace(/:\/\//, '');
   const appLink = `${scheme}://reset-password?token=${encodeURIComponent(resetToken)}`;
   const baseUrl = (process.env.RESET_PASSWORD_BASE_URL || process.env.FRONTEND_URL || '').replace(
@@ -368,6 +414,13 @@ export const sendPasswordResetEmail = async (to: string, resetToken: string): Pr
   const webLink = baseUrl
     ? `${baseUrl}/reset-password?token=${encodeURIComponent(resetToken)}`
     : null;
+
+  console.log('[API] [email] [password-reset] links (token masked)', {
+    appLink: maskSecretInUrl(appLink),
+    webLink: webLink ? maskSecretInUrl(webLink) : null,
+    scheme,
+    webBaseConfigured: Boolean(baseUrl),
+  });
 
   const subject = 'Passwort zurücksetzen – Herz Check Bonn';
   const html = `
@@ -402,7 +455,7 @@ export const sendPasswordResetEmail = async (to: string, resetToken: string): Pr
     .filter(Boolean)
     .join('\n\n');
 
-  await sendEmail({ to, subject, text, html });
+  await sendEmail({ to, subject, text, html }, 'password-reset');
 };
 
 

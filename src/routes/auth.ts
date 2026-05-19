@@ -18,6 +18,9 @@ import { sendPasswordResetEmail } from '../utils/email';
 const router = express.Router();
 const RESET_TOKEN_EXPIRY_MS = 3600000; // 1 hour
 
+const resetTokenHint = (token: string): string =>
+  token.length > 8 ? `${token.slice(0, 8)}…(${token.length} chars)` : '(short)';
+
 function parseAdminEmailSet(): Set<string> {
   return new Set(
     (process.env.ADMIN_EMAILS ?? '')
@@ -301,12 +304,16 @@ router.post('/login', validateLogin, async (req: Request, res: Response) => {
  *                   type: string
  */
 router.post('/forgot-password', async (req: Request, res: Response) => {
-  console.log('[Auth] POST /forgot-password – request received');
+  const startedAt = Date.now();
+  console.log('[Auth] [forgot-password] request received', {
+    ip: req.ip,
+    nodeEnv: process.env.NODE_ENV || '(unset)',
+  });
   try {
     const { email: emailRaw } = req.body;
-    console.log('[Auth] POST /forgot-password – email:', emailRaw || '(missing)');
 
     if (!emailRaw || typeof emailRaw !== 'string') {
+      console.warn('[Auth] [forgot-password] rejected: MISSING_EMAIL');
       res.status(400).json({
         error: 'Email is required',
         code: 'MISSING_EMAIL',
@@ -315,7 +322,13 @@ router.post('/forgot-password', async (req: Request, res: Response) => {
     }
 
     const email = normalizeAuthEmail(emailRaw);
+    console.log('[Auth] [forgot-password] email normalized', {
+      raw: emailRaw,
+      normalized: email,
+    });
+
     if (!isValidEmailFormat(email)) {
+      console.warn('[Auth] [forgot-password] rejected: INVALID_EMAIL', { normalized: email });
       res.status(400).json({
         error: 'Invalid email address',
         code: 'INVALID_EMAIL',
@@ -325,6 +338,10 @@ router.post('/forgot-password', async (req: Request, res: Response) => {
 
     const user = await User.findOne({ email }).select('+passwordResetToken +passwordResetExpires');
     if (!user) {
+      console.log('[Auth] [forgot-password] no user for email (generic 200 returned)', {
+        normalized: email,
+        durationMs: Date.now() - startedAt,
+      });
       res.json({
         message: 'If the email exists, a password reset link has been sent',
       });
@@ -332,15 +349,32 @@ router.post('/forgot-password', async (req: Request, res: Response) => {
     }
 
     const token = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + RESET_TOKEN_EXPIRY_MS);
+    const hadPreviousToken = Boolean(user.passwordResetToken);
     user.set('passwordResetToken', token);
-    user.set('passwordResetExpires', new Date(Date.now() + RESET_TOKEN_EXPIRY_MS));
+    user.set('passwordResetExpires', expiresAt);
     await user.save();
+
+    console.log('[Auth] [forgot-password] reset token stored', {
+      userId: user._id.toString(),
+      email,
+      tokenHint: resetTokenHint(token),
+      expiresAt: expiresAt.toISOString(),
+      hadPreviousToken,
+    });
 
     try {
       await sendPasswordResetEmail(email, token);
-      console.log('[Auth] POST /forgot-password – reset email sent to', email);
+      console.log('[Auth] [forgot-password] email dispatch OK', {
+        email,
+        durationMs: Date.now() - startedAt,
+      });
     } catch (emailErr: any) {
-      console.error('[Auth] POST /forgot-password – failed to send email:', emailErr.message);
+      console.error('[Auth] [forgot-password] email dispatch FAILED', {
+        email,
+        message: emailErr?.message,
+        durationMs: Date.now() - startedAt,
+      });
       res.status(500).json({
         error: 'Failed to send reset email. Please try again later.',
         code: 'EMAIL_SEND_FAILED',
@@ -355,9 +389,18 @@ router.post('/forgot-password', async (req: Request, res: Response) => {
       const scheme = (process.env.RESET_PASSWORD_APP_SCHEME || 'ukbonnsurvey').replace(/:\/\//, '');
       payload.resetLink = `${scheme}://reset-password?token=${encodeURIComponent(token)}`;
       payload.resetToken = token;
+      console.log('[Auth] [forgot-password] dev payload includes resetLink/token', {
+        tokenHint: resetTokenHint(token),
+      });
     }
+    console.log('[Auth] [forgot-password] completed', {
+      email,
+      status: 200,
+      durationMs: Date.now() - startedAt,
+    });
     res.json(payload);
   } catch (error) {
+    console.error('[Auth] [forgot-password] unhandled error', error);
     throw error;
   }
 });
@@ -395,12 +438,15 @@ router.post('/forgot-password', async (req: Request, res: Response) => {
  *                   type: string
  */
 router.post('/reset-password', async (req: Request, res: Response) => {
-  console.log('[Auth] POST /reset-password – request received');
+  const startedAt = Date.now();
+  console.log('[Auth] [reset-password] request received', { ip: req.ip });
   try {
     const { token, newPassword } = req.body;
-    console.log('[Auth] POST /reset-password – token:', token ? 'present' : 'missing', 'newPassword:', newPassword ? 'present' : 'missing');
+    const tokenHint =
+      typeof token === 'string' ? resetTokenHint(token) : '(missing)';
 
     if (!token || !newPassword) {
+      console.warn('[Auth] [reset-password] rejected: MISSING_FIELDS', { tokenHint });
       res.status(400).json({
         error: 'Token and new password are required',
         code: 'MISSING_FIELDS',
@@ -410,6 +456,7 @@ router.post('/reset-password', async (req: Request, res: Response) => {
 
     const passwordCheck = validatePasswordStrength(newPassword);
     if (!passwordCheck.valid) {
+      console.warn('[Auth] [reset-password] rejected: WEAK_PASSWORD', { tokenHint });
       res.status(400).json({
         error: passwordCheck.error || 'Password must be at least 8 characters and contain uppercase, lowercase, number and special character',
         code: 'WEAK_PASSWORD',
@@ -424,6 +471,15 @@ router.post('/reset-password', async (req: Request, res: Response) => {
       .select('+password +passwordResetToken +passwordResetExpires');
 
     if (!user) {
+      const expiredCandidate = await User.findOne({ passwordResetToken: token }).select(
+        '+passwordResetExpires'
+      );
+      console.warn('[Auth] [reset-password] rejected: INVALID_TOKEN', {
+        tokenHint,
+        tokenKnownButExpired: Boolean(expiredCandidate),
+        expiresAt: expiredCandidate?.passwordResetExpires?.toISOString() ?? null,
+        now: new Date().toISOString(),
+      });
       res.status(400).json({
         error: 'Invalid or expired reset token',
         code: 'INVALID_TOKEN',
@@ -440,10 +496,17 @@ router.post('/reset-password', async (req: Request, res: Response) => {
       }
     );
 
+    console.log('[Auth] [reset-password] password updated', {
+      userId: user._id.toString(),
+      email: user.email,
+      tokenHint,
+      durationMs: Date.now() - startedAt,
+    });
     res.json({
       message: 'Password has been reset successfully',
     });
   } catch (error) {
+    console.error('[Auth] [reset-password] unhandled error', error);
     throw error;
   }
 });
