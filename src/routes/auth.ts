@@ -336,39 +336,25 @@ router.post('/forgot-password', async (req: Request, res: Response) => {
     user.set('passwordResetExpires', new Date(Date.now() + RESET_TOKEN_EXPIRY_MS));
     await user.save();
 
-    const smtpReady = Boolean(process.env.SMTP_USER && process.env.SMTP_PASS);
-    if (!smtpReady) {
-      console.warn('[Auth] POST /forgot-password – SMTP not configured');
-      if (process.env.NODE_ENV === 'production') {
-        res.status(503).json({
-          error: 'Password reset email is not available. Contact support.',
-          code: 'EMAIL_NOT_CONFIGURED',
-        });
-        return;
-      }
-    } else {
-      try {
-        await sendPasswordResetEmail(email, token);
-        console.log('[Auth] POST /forgot-password – reset email sent to', email);
-      } catch (emailErr: any) {
-        console.error('[Auth] POST /forgot-password – failed to send email:', emailErr.message);
-        res.status(500).json({
-          error: 'Failed to send reset email. Please try again later.',
-          code: 'EMAIL_SEND_FAILED',
-        });
-        return;
-      }
+    try {
+      await sendPasswordResetEmail(email, token);
+      console.log('[Auth] POST /forgot-password – reset email sent to', email);
+    } catch (emailErr: any) {
+      console.error('[Auth] POST /forgot-password – failed to send email:', emailErr.message);
+      res.status(500).json({
+        error: 'Failed to send reset email. Please try again later.',
+        code: 'EMAIL_SEND_FAILED',
+      });
+      return;
     }
 
     const payload: { message: string; resetToken?: string; resetLink?: string } = {
       message: 'If the email exists, a password reset link has been sent',
     };
-    if (!smtpReady || process.env.NODE_ENV !== 'production') {
+    if (process.env.NODE_ENV !== 'production') {
       const scheme = (process.env.RESET_PASSWORD_APP_SCHEME || 'ukbonnsurvey').replace(/:\/\//, '');
       payload.resetLink = `${scheme}://reset-password?token=${encodeURIComponent(token)}`;
-      if (!smtpReady) {
-        payload.resetToken = token;
-      }
+      payload.resetToken = token;
     }
     res.json(payload);
   } catch (error) {

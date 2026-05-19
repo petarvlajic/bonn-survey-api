@@ -13,6 +13,9 @@ interface EmailOptions {
   }>;
 }
 
+/** Same SMTP env as consent/survey PDF emails (SMTP_HOST, SMTP_USER, SMTP_PASS, …). */
+export const isSmtpConfigured = (): boolean => Boolean(process.env.SMTP_HOST);
+
 // Create transporter based on environment variables (Strato: port 465 + SSL)
 const createTransporter = () => {
   const port = parseInt(process.env.SMTP_PORT || '587', 10);
@@ -352,9 +355,8 @@ University Hospital Bonn
 };
 
 /**
- * Send password reset email with link containing token.
- * RESET_PASSWORD_BASE_URL in env should be the app URL (e.g. https://survey.herz-check-bonn.de for web)
- * so the link is: {baseUrl}/reset-password?token=...
+ * Send password reset email (same SMTP transport as consent PDF mail).
+ * Link opens the app: ukbonnsurvey://reset-password?token=…
  */
 export const sendPasswordResetEmail = async (to: string, resetToken: string): Promise<void> => {
   const scheme = (process.env.RESET_PASSWORD_APP_SCHEME || 'ukbonnsurvey').replace(/:\/\//, '');
