@@ -347,6 +347,24 @@ describe('auth routes integration', () => {
     expect(res.body.message).toBeTruthy();
   });
 
+  it('forgot-password is case-insensitive for email lookup', async () => {
+    if (!mongoReady) {
+      expect(true).toBe(true);
+      return;
+    }
+    await request(app).post('/api/auth/register').send({
+      email: 'CaseMix@ukbonn.de',
+      password: STRONG_PASSWORD,
+      firstName: 'C',
+      lastName: 'M',
+    });
+    const forgot = await request(app).post('/api/auth/forgot-password').send({
+      email: 'CASEMIX@ukbonn.de',
+    });
+    expect(forgot.status).toBe(200);
+    expect(forgot.body.resetToken).toBeTruthy();
+  });
+
   it('stores reset token and allows reset-password with strong new password', async () => {
     if (!mongoReady) {
       expect(true).toBe(true);

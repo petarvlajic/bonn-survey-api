@@ -5,9 +5,13 @@ const WEAK_PASSWORD_MESSAGE =
 
 const EMAIL_FORMAT = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+/** Lowercase trim — must match User schema `lowercase: true` on save when querying. */
+export const normalizeAuthEmail = (email: string): string =>
+  String(email).trim().toLowerCase();
+
 /** Any plausible email (patient / personal accounts). */
 export const isValidEmailFormat = (email: string): boolean =>
-  typeof email === 'string' && EMAIL_FORMAT.test(email.trim().toLowerCase());
+  typeof email === 'string' && EMAIL_FORMAT.test(normalizeAuthEmail(email));
 
 /** UK Bonn staff mailbox (SHK / interviewer registration). */
 export const isUkbonnStaffEmail = (email: string): boolean =>
@@ -98,5 +102,6 @@ export const validateLogin = (
     return;
   }
 
+  req.body.email = normalizeAuthEmail(email);
   next();
 };

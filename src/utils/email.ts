@@ -357,35 +357,48 @@ University Hospital Bonn
  * so the link is: {baseUrl}/reset-password?token=...
  */
 export const sendPasswordResetEmail = async (to: string, resetToken: string): Promise<void> => {
-  const baseUrl = (process.env.RESET_PASSWORD_BASE_URL || process.env.FRONTEND_URL || '').replace(/\/$/, '');
-  const resetLink = baseUrl ? `${baseUrl}/reset-password?token=${encodeURIComponent(resetToken)}` : null;
+  const scheme = (process.env.RESET_PASSWORD_APP_SCHEME || 'ukbonnsurvey').replace(/:\/\//, '');
+  const appLink = `${scheme}://reset-password?token=${encodeURIComponent(resetToken)}`;
+  const baseUrl = (process.env.RESET_PASSWORD_BASE_URL || process.env.FRONTEND_URL || '').replace(
+    /\/$/,
+    ''
+  );
+  const webLink = baseUrl
+    ? `${baseUrl}/reset-password?token=${encodeURIComponent(resetToken)}`
+    : null;
 
-  const subject = 'Reset your password – UK Bonn Survey';
+  const subject = 'Passwort zurücksetzen – Herz Check Bonn';
   const html = `
     <!DOCTYPE html>
     <html>
     <head><meta charset="utf-8"></head>
     <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
       <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-        <p>Hello,</p>
-        <p>You requested a password reset for your UK Bonn Survey account.</p>
+        <p>Guten Tag,</p>
+        <p>Sie haben ein neues Passwort für Ihr Herz Check Bonn-Konto angefordert.</p>
+        <p><a href="${appLink}" style="display: inline-block; padding: 10px 20px; background: #1976d2; color: #fff; text-decoration: none; border-radius: 5px;">Passwort zurücksetzen (App öffnen)</a></p>
+        <p style="word-break: break-all; font-size: 13px; color: #555;">App-Link: ${appLink}</p>
         ${
-          resetLink
-            ? `<p><a href="${resetLink}" style="display: inline-block; padding: 10px 20px; background: #1976d2; color: #fff; text-decoration: none; border-radius: 5px;">Reset password</a></p>
-        <p>Or copy this link into your browser:</p>
-        <p style="word-break: break-all;">${resetLink}</p>
-        <p>This link expires in 1 hour.</p>`
-            : '<p>Use the reset token provided by the support team to set a new password in the app.</p>'
+          webLink
+            ? `<p style="font-size: 13px; word-break: break-all;">Alternativ im Browser: <a href="${webLink}">${webLink}</a></p>`
+            : ''
         }
-        <p>If you did not request this, you can ignore this email.</p>
-        <p>Best regards,<br>UK Bonn Survey Team</p>
+        <p>Dieser Link ist 1 Stunde gültig.</p>
+        <p>Wenn Sie das nicht angefordert haben, ignorieren Sie diese E-Mail.</p>
+        <p>Mit freundlichen Grüßen<br>Herz Check Bonn</p>
       </div>
     </body>
     </html>
   `;
-  const text = resetLink
-    ? `Reset your password: ${resetLink}\n\nThis link expires in 1 hour.\n\nIf you did not request this, ignore this email.`
-    : 'You requested a password reset. Use the reset token in the app. If you did not request this, ignore this email.';
+  const text = [
+    'Sie haben ein neues Passwort angefordert.',
+    `App-Link (in der App öffnen): ${appLink}`,
+    webLink ? `Browser: ${webLink}` : '',
+    'Gültig für 1 Stunde.',
+    'Wenn Sie das nicht angefordert haben, ignorieren Sie diese E-Mail.',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 
   await sendEmail({ to, subject, text, html });
 };

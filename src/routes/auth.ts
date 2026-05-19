@@ -4,7 +4,13 @@ import mongoose from 'mongoose';
 import { User } from '../models/User';
 import { hashPassword, comparePassword } from '../utils/password';
 import { generateToken } from '../utils/jwt';
-import { validateRegister, validateLogin, validatePasswordStrength, isValidEmailFormat } from '../middleware/validation';
+import {
+  validateRegister,
+  validateLogin,
+  validatePasswordStrength,
+  isValidEmailFormat,
+  normalizeAuthEmail,
+} from '../middleware/validation';
 import { authenticate } from '../middleware/auth';
 import { requireAdmin } from '../middleware/requireAdmin';
 import { sendPasswordResetEmail } from '../utils/email';
@@ -94,8 +100,9 @@ router.post('/register', validateRegister, async (req: Request, res: Response) =
     } = req.body;
     console.log('[Auth] POST /register – email:', email, 'firstName:', firstName);
 
+    const emailNorm = normalizeAuthEmail(email);
     // Check if user already exists
-    const existingUser = await User.findOne({ email });
+    const existingUser = await User.findOne({ email: emailNorm });
     if (existingUser) {
       console.log('[Auth] POST /register – 400 User already exists:', email);
       res.status(400).json({
@@ -132,7 +139,7 @@ router.post('/register', validateRegister, async (req: Request, res: Response) =
     }
 
     const user = new User({
-      email,
+      email: emailNorm,
       password: hashedPassword,
       profile,
     });
@@ -296,13 +303,22 @@ router.post('/login', validateLogin, async (req: Request, res: Response) => {
 router.post('/forgot-password', async (req: Request, res: Response) => {
   console.log('[Auth] POST /forgot-password – request received');
   try {
-    const { email } = req.body;
-    console.log('[Auth] POST /forgot-password – email:', email || '(missing)');
+    const { email: emailRaw } = req.body;
+    console.log('[Auth] POST /forgot-password – email:', emailRaw || '(missing)');
 
-    if (!email) {
+    if (!emailRaw || typeof emailRaw !== 'string') {
       res.status(400).json({
         error: 'Email is required',
         code: 'MISSING_EMAIL',
+      });
+      return;
+    }
+
+    const email = normalizeAuthEmail(emailRaw);
+    if (!isValidEmailFormat(email)) {
+      res.status(400).json({
+        error: 'Invalid email address',
+        code: 'INVALID_EMAIL',
       });
       return;
     }
@@ -316,11 +332,21 @@ router.post('/forgot-password', async (req: Request, res: Response) => {
     }
 
     const token = crypto.randomBytes(32).toString('hex');
-    (user as any).passwordResetToken = token;
-    (user as any).passwordResetExpires = new Date(Date.now() + RESET_TOKEN_EXPIRY_MS);
+    user.set('passwordResetToken', token);
+    user.set('passwordResetExpires', new Date(Date.now() + RESET_TOKEN_EXPIRY_MS));
     await user.save();
 
-    if (process.env.SMTP_USER && process.env.SMTP_PASS) {
+    const smtpReady = Boolean(process.env.SMTP_USER && process.env.SMTP_PASS);
+    if (!smtpReady) {
+      console.warn('[Auth] POST /forgot-password – SMTP not configured');
+      if (process.env.NODE_ENV === 'production') {
+        res.status(503).json({
+          error: 'Password reset email is not available. Contact support.',
+          code: 'EMAIL_NOT_CONFIGURED',
+        });
+        return;
+      }
+    } else {
       try {
         await sendPasswordResetEmail(email, token);
         console.log('[Auth] POST /forgot-password – reset email sent to', email);
@@ -332,15 +358,17 @@ router.post('/forgot-password', async (req: Request, res: Response) => {
         });
         return;
       }
-    } else {
-      console.warn('[Auth] POST /forgot-password – SMTP not configured, reset email not sent');
     }
 
-    const payload: { message: string; resetToken?: string } = {
+    const payload: { message: string; resetToken?: string; resetLink?: string } = {
       message: 'If the email exists, a password reset link has been sent',
     };
-    if (process.env.NODE_ENV !== 'production' && !process.env.SMTP_USER) {
-      payload.resetToken = token;
+    if (!smtpReady || process.env.NODE_ENV !== 'production') {
+      const scheme = (process.env.RESET_PASSWORD_APP_SCHEME || 'ukbonnsurvey').replace(/:\/\//, '');
+      payload.resetLink = `${scheme}://reset-password?token=${encodeURIComponent(token)}`;
+      if (!smtpReady) {
+        payload.resetToken = token;
+      }
     }
     res.json(payload);
   } catch (error) {
