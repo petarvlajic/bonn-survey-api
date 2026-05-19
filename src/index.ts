@@ -14,6 +14,7 @@ import userRoutes from './routes/users';
 import surveyRoutes from './routes/surveys';
 import responseRoutes from './routes/responses';
 import draftRoutes from './routes/drafts';
+import publicPatientRoutes from './routes/publicPatient';
 
 // Load environment variables
 dotenv.config();
@@ -93,6 +94,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/surveys', surveyRoutes);
 app.use('/api/responses', responseRoutes);
+app.use('/api/public', publicPatientRoutes);
 app.use('/api/drafts', draftRoutes);
 
 // Serve admin panel
