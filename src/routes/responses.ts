@@ -16,6 +16,7 @@ import { generatePid } from '../utils/pid';
 import { buildResponseCsv } from '../utils/responseExport';
 import { buildFieldChanges, verifyPostClosePin } from '../utils/audit';
 import { parseEchoScreeningFromBody } from '../utils/shkEchoScreening';
+import type { Answer } from '../types';
 
 const router = express.Router();
 function buildWorkflowBucketFilter(bucket: string): Record<string, unknown> | null {
@@ -50,6 +51,21 @@ function buildWorkflowBucketFilter(bucket: string): Record<string, unknown> | nu
     };
   }
   return null;
+}
+
+function transformAnswersForStorage(answersArray: Record<string, unknown>[]): Answer[] {
+  return answersArray.map((ans) => {
+    const transformed: Record<string, unknown> = {
+      questionId: ans.questionId,
+      type: ans.type,
+    };
+    if (ans.answer !== undefined) transformed.value = ans.answer;
+    else if (ans.value !== undefined) transformed.value = ans.value;
+    if (ans.imageUri !== undefined) transformed.imageUri = ans.imageUri;
+    if (ans.fileUri !== undefined) transformed.fileUri = ans.fileUri;
+    if (ans.signatureBase64 !== undefined) transformed.signatureBase64 = ans.signatureBase64;
+    return transformed as unknown as Answer;
+  });
 }
 
 const TRACKED_UPDATE_FIELDS = [
@@ -477,27 +493,7 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
     // Use answers or answer (singular)
     const answersArray = answers || (answer ? [answer] : []);
 
-    // Transform answers: map "answer" field to "value" field, remove extra fields
-    const transformedAnswers = answersArray.map((ans: any) => {
-      const transformed: any = {
-        questionId: ans.questionId,
-        type: ans.type,
-      };
-
-      // Map "answer" to "value" (support both field names)
-      if (ans.answer !== undefined) {
-        transformed.value = ans.answer;
-      } else if (ans.value !== undefined) {
-        transformed.value = ans.value;
-      }
-
-      // Keep optional fields if present
-      if (ans.imageUri !== undefined) transformed.imageUri = ans.imageUri;
-      if (ans.fileUri !== undefined) transformed.fileUri = ans.fileUri;
-      if (ans.signatureBase64 !== undefined) transformed.signatureBase64 = ans.signatureBase64;
-
-      return transformed;
-    });
+    const transformedAnswers = transformAnswersForStorage(answersArray as Record<string, unknown>[]);
 
     // Determine draft status: if status is "completed", set draft to false
     let finalDraft = draft;
@@ -886,7 +882,9 @@ router.put('/:id', authenticate, async (req: Request, res: Response) => {
       birthDate: response.birthDate,
     };
 
-    if (answers !== undefined) response.answers = answers;
+    if (answers !== undefined) {
+      response.answers = transformAnswersForStorage(answers as Record<string, unknown>[]);
+    }
     if (signatureBase64 !== undefined) response.signatureBase64 = signatureBase64;
     if (draft !== undefined) response.draft = draft;
     if (parsedCompletedAt !== undefined) response.completedAt = parsedCompletedAt;

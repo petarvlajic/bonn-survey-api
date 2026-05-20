@@ -8,9 +8,18 @@ export interface ResponseLikeForConsentPdf {
   birthDate?: string;
   completedAt?: Date;
   signatureBase64?: string;
-  answers?: Array<{ questionId: string; value?: unknown }>;
+  answers?: Array<{ questionId: string; value?: unknown; answer?: unknown }>;
   /** Populated user doc with `profile.examinerSignatureBase64`, or an ObjectId before populate. */
   userId?: unknown;
+}
+
+function answerString(
+  row: { value?: unknown; answer?: unknown } | undefined
+): string {
+  if (!row) return '';
+  if (row.value != null && String(row.value).trim()) return String(row.value).trim();
+  if (row.answer != null && String(row.answer).trim()) return String(row.answer).trim();
+  return '';
 }
 
 export type BuildFinalConsentEmailPdfOptions = {
@@ -20,25 +29,98 @@ export type BuildFinalConsentEmailPdfOptions = {
   examinerName?: string | null;
 };
 
-/** UKB bundled PDF (9 pages): signature block is on page 8 (index 7). */
+/** UKB bundled PDF: page indices depend on export (8-page vs legacy 9-page). */
+export function consentIntroPageIndex(pageCount: number): number {
+  if (pageCount < 1) return 0;
+  // 8-page UKB PDF (~2026): “Ich wurde von …” / discussion block on page 7 → index 6.
+  if (pageCount === 8) return 6;
+  // Legacy 9-page: same narrative at the start of the document → page 1 → index 0.
+  if (pageCount === 9) return 0;
+  // Other lengths: assume narrative immediately before signature page.
+  return Math.max(0, pageCount - 2);
+}
+
+/** Zero-based index of the page that carries participant / examiner signature fields. */
 export function consentSignaturePageIndex(pageCount: number): number {
-  if (pageCount >= 2) return pageCount - 2;
-  return Math.max(0, pageCount - 1);
+  if (pageCount < 1) return 0;
+  // 8-page UKB PDF (~2026): signature block on last page → index 7.
+  if (pageCount === 8) return 7;
+  // Legacy 9-page: signatures on page 8 → index 7.
+  if (pageCount === 9) return 7;
+  return pageCount - 1;
+}
+
+/** Isti x za oba „Bonn, Datum“ / Ort+Datum polja na potpisnoj stranici. */
+const SIGNATURE_DATE_X_PT = 143;
+
+/**
+ * Last page signature block (8-page UKB PDF). pdf-lib: origin bottom-left; veći y = više na stranici.
+ * Podešeno da odgovara novom layoutu (2026).
+ */
+const UKB_SIGNATURE_LAYOUT = {
+  /** LOCKED — ne menjati koordinate (korisnik potvrdio). */
+  participantName: { x: 78, y: 684, size: 11, baselineFraction: 0.55 },
+  participantDate: { x: SIGNATURE_DATE_X_PT, y: 650, size: 10 },
+  participantSignature: { x: 315, y: 596, width: 200, height: 40, lift: 0.5 },
+  examinerName: { x: 78, y: 513, size: 11 },
+  examinerDate: { x: SIGNATURE_DATE_X_PT, y: 475, size: 10 },
+  examinerSignature: { x: 315, y: 422, width: 200, height: 40, lift: 0.5 },
+} as const;
+
+/** A4 visina (pt) za procenat pomaka. */
+const A4_HEIGHT_PT = 842;
+/** Vertikalni pomak nadole od referenci 642 / 528. ~20% stranice + fine 2 pt. */
+const INTRO_SHIFT_DOWN_PT = Math.round(A4_HEIGHT_PT * 0.2) + 2;
+/** Nudge both blocks slightly right. */
+const INTRO_SHIFT_RIGHT_PT = 40;
+/** Ne klizeti ispod margin-a (pdf-lib y od dna). */
+const INTRO_MIN_Y_DISCUSSION_PT = 52;
+/** Minimalni razmak između imena i teksta „besprochen“ bloka. */
+const INTRO_MIN_GAP_NAME_ABOVE_DISCUSSION_PT = 44;
+
+/** Dodatno nadole samo za blok „Zusätzlich … besprochen“ (pt) — izbegava preklapanje sa telom teksta. */
+const INTRO_DISCUSSION_EXTRA_DOWN_PT = 22;
+/** Gornje polje (Ich wurde von …): spusti još malo (pt). */
+const INTRO_NAME_EXTRA_DOWN_PT = 16;
+/** Donje polje (besprochen): blago nagore (pt). */
+const INTRO_DISCUSSION_RAISE_PT = 2;
+/** Donje polje: pomeri u levo (pt, smanji x). */
+const INTRO_DISCUSSION_NUDGE_LEFT_PT = 26;
+
+function buildIntroNarrativePageLayout() {
+  const rawNameY = 642 - INTRO_SHIFT_DOWN_PT;
+  const rawDiscY = 528 - INTRO_SHIFT_DOWN_PT;
+  let discussionY = Math.max(INTRO_MIN_Y_DISCUSSION_PT, rawDiscY);
+  discussionY = Math.max(INTRO_MIN_Y_DISCUSSION_PT, discussionY - INTRO_DISCUSSION_EXTRA_DOWN_PT);
+  discussionY += INTRO_DISCUSSION_RAISE_PT;
+  let nameY = Math.max(INTRO_MIN_Y_DISCUSSION_PT + INTRO_MIN_GAP_NAME_ABOVE_DISCUSSION_PT, rawNameY);
+  nameY -= INTRO_NAME_EXTRA_DOWN_PT;
+  if (nameY < discussionY + INTRO_MIN_GAP_NAME_ABOVE_DISCUSSION_PT) {
+    nameY = discussionY + INTRO_MIN_GAP_NAME_ABOVE_DISCUSSION_PT;
+  }
+  return {
+    informedByName: {
+      x: 122 + INTRO_SHIFT_RIGHT_PT,
+      y: nameY,
+      size: 10 as const,
+      maxWidth: 380 as const,
+    },
+    discussionPoints: {
+      x: 56 + INTRO_SHIFT_RIGHT_PT - INTRO_DISCUSSION_NUDGE_LEFT_PT,
+      y: discussionY,
+      size: 11 as const,
+      maxWidth: 483 as const,
+      lineHeight: 13 as const,
+      maxLines: 14 as const,
+    },
+  };
 }
 
 /**
- * A4 UKB export (page 8 of 9): pdf-lib coords, origin bottom-left.
- * Layout y = position of the printed horizontal rule; helpers offset text/signatures onto it.
+ * Narrative section page of UKB „Patienteninformation“ (8-page export: page 7).
+ * Coordinates are pdf-lib (origin bottom-left). Re-calibrate if the template changes.
  */
-const UKB_SIGNATURE_LAYOUT = {
-  /** Between consent heading (~698 too high) and Ort/Datum row (~632 too low) on 9-page UKB export. */
-  participantName: { x: 78, y: 662, size: 11, baselineFraction: 0.55 },
-  participantDate: { x: 78, y: 628, size: 10 },
-  participantSignature: { x: 325, y: 632, width: 200, height: 40, lift: 0.5 },
-  examinerName: { x: 78, y: 560, size: 11 },
-  examinerDate: { x: 78, y: 472, size: 10 },
-  examinerSignature: { x: 325, y: 528, width: 200, height: 40, lift: 0.5 },
-} as const;
+const UKB_INTRO_NARRATIVE_PAGE = buildIntroNarrativePageLayout();
 
 /** Raise text baseline above the rule (fraction of font size). */
 function textBaselineY(lineY: number, fontSize: number, baselineFraction = 0.5): number {
@@ -140,8 +222,65 @@ export async function buildConsentSignaturesCoverPdf(params: {
 }
 
 /**
+ * Overlays consent step fields onto the narrative page (page 7 of 8-page UKB PDF;
+ * page 1 of legacy 9-page), after “Ich wurde von …” and below “… folgende Punkte besprochen:”.
+ */
+export async function stampConsentIntroOnOfficialPdf(
+  officialPdf: Buffer,
+  params: { informedByName: string; discussionPoints: string }
+): Promise<Buffer> {
+  const name = params.informedByName.trim();
+  const discussion = params.discussionPoints.trim();
+  if (!name && !discussion) return officialPdf;
+
+  const doc = await PdfLibDocument.load(officialPdf);
+  const n = doc.getPageCount();
+  if (n < 1) return officialPdf;
+  const pageIdx = Math.min(consentIntroPageIndex(n), n - 1);
+  const page = doc.getPage(pageIdx);
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const L = UKB_INTRO_NARRATIVE_PAGE;
+
+  if (name) {
+    let size: number = L.informedByName.size;
+    const maxW = L.informedByName.maxWidth;
+    let display = name;
+    while (display.length > 2 && font.widthOfTextAtSize(display, size) > maxW) {
+      size = Math.max(7, size - 0.5);
+      if (size <= 7.2 && display.length > 42) {
+        display = `${display.slice(0, 40)}…`;
+        break;
+      }
+    }
+    page.drawText(display, {
+      x: L.informedByName.x,
+      y: textBaselineY(L.informedByName.y, size),
+      size,
+      font,
+      maxWidth: maxW,
+    });
+  }
+
+  if (discussion) {
+    page.drawText(discussion, {
+      x: L.discussionPoints.x,
+      y: textBaselineY(L.discussionPoints.y, L.discussionPoints.size),
+      size: L.discussionPoints.size,
+      font,
+      maxWidth: L.discussionPoints.maxWidth,
+      lineHeight: L.discussionPoints.lineHeight,
+    });
+  }
+
+  return Buffer.from(await doc.save());
+}
+
+/** @deprecated Use stampConsentIntroOnOfficialPdf */
+export const stampConsentIntroOnFirstPage = stampConsentIntroOnOfficialPdf;
+
+/**
  * Stamp participant + examiner names, dates, and signatures onto the UKB signature page
- * (page 8 in the bundled 9-page UKB export; all pages are kept in the email PDF).
+ * (last page of 8-page export; page 8 of legacy 9-page).
  */
 export async function stampSignaturesOnOfficialPdf(
   officialPdf: Buffer,
@@ -155,7 +294,7 @@ export async function stampSignaturesOnOfficialPdf(
 ): Promise<Buffer> {
   const doc = await PdfLibDocument.load(officialPdf);
   const pageIndex = consentSignaturePageIndex(doc.getPageCount());
-  const page = doc.getPages()[pageIndex];
+  const page = doc.getPage(pageIndex);
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const L = UKB_SIGNATURE_LAYOUT;
   const placeDate = params.dateLabel ? `Bonn, ${params.dateLabel}` : 'Bonn';
@@ -227,6 +366,11 @@ function participantSignatureRaw(doc: ResponseLikeForConsentPdf): string {
   return legacy || '';
 }
 
+function consentDiscussionPointsFromDoc(doc: ResponseLikeForConsentPdf): string {
+  const answer = doc.answers?.find((a) => a.questionId === 'consentDiscussionPoints');
+  return answerString(answer);
+}
+
 function examinerNameFromDoc(
   doc: ResponseLikeForConsentPdf,
   options?: BuildFinalConsentEmailPdfOptions
@@ -234,10 +378,7 @@ function examinerNameFromDoc(
   const fromOptions = options?.examinerName?.trim();
   if (fromOptions) return fromOptions;
   const answer = doc.answers?.find((a) => a.questionId === 'consentExplainedBy');
-  const fromAnswer =
-    answer?.value != null && String(answer.value).trim()
-      ? String(answer.value).trim()
-      : '';
+  const fromAnswer = answerString(answer);
   if (fromAnswer) return fromAnswer;
   const profile =
     doc.userId &&
@@ -264,15 +405,14 @@ function examinerSignatureFromDoc(
 
 function consentSigningDateIso(doc: ResponseLikeForConsentPdf): string {
   const dateAnswer = doc.answers?.find((a) => a.questionId === 'date');
-  if (dateAnswer?.value != null && String(dateAnswer.value).trim()) {
-    return String(dateAnswer.value).trim();
-  }
+  const d = answerString(dateAnswer);
+  if (d) return d;
   if (doc.completedAt) return doc.completedAt.toISOString().split('T')[0];
   return new Date().toISOString().split('T')[0];
 }
 
 /**
- * Final PDF for consent email: full 9-page UKB Patienteninformation with signatures on page 8.
+ * Final PDF for consent email: full UKB Patienteninformation with text on page 1 + signatures on the signature page.
  */
 export async function buildFinalConsentEmailPdf(
   doc: ResponseLikeForConsentPdf,
@@ -311,6 +451,19 @@ export async function buildFinalConsentEmailPdf(
   });
 
   const examinerName = examinerNameFromDoc(doc, options);
+  const discussion = consentDiscussionPointsFromDoc(doc);
+
+  if (examinerName || discussion) {
+    try {
+      official = await stampConsentIntroOnOfficialPdf(official, {
+        informedByName: examinerName,
+        discussionPoints: discussion,
+      });
+      console.log('[consentEmailPdf] Stamped informed-by + discussion on narrative page');
+    } catch (e) {
+      console.warn('[consentEmailPdf] Could not stamp intro fields:', (e as Error).message);
+    }
+  }
 
   if (participantSig || examinerSig || name || examinerName) {
     try {

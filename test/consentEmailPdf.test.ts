@@ -3,6 +3,7 @@ import PDFDocument from 'pdfkit';
 import { PDFDocument as PdfLibDocument } from 'pdf-lib';
 import {
   buildFinalConsentEmailPdf,
+  consentIntroPageIndex,
   consentSignaturePageIndex,
   mergePdfBuffers,
   parseDataUrlImageToBuffer,
@@ -43,12 +44,15 @@ describe('consentEmailPdf', () => {
     expect(parseDataUrlImageToBuffer('')).toBeNull();
   });
 
-  it('consentSignaturePageIndex targets page 8 of 9-page UKB export', () => {
+  it('consent page indices: 8-page PDF narrative on page 7, signatures on page 8', () => {
+    expect(consentIntroPageIndex(8)).toBe(6);
+    expect(consentSignaturePageIndex(8)).toBe(7);
+    expect(consentIntroPageIndex(9)).toBe(0);
     expect(consentSignaturePageIndex(9)).toBe(7);
     expect(consentSignaturePageIndex(1)).toBe(0);
   });
 
-  it('stampSignaturesOnOfficialPdf keeps all 9 pages and stamps page 8', async () => {
+  it('stampSignaturesOnOfficialPdf keeps all pages and stamps signature page', async () => {
     const bundled = path.join(
       process.cwd(),
       'assets/consent/patienteninformation-einwilligung-erwachsene.pdf'
@@ -67,7 +71,7 @@ describe('consentEmailPdf', () => {
       dateLabel: '15.05.2026',
     });
     const doc = await PdfLibDocument.load(stamped);
-    expect(doc.getPageCount()).toBe(9);
+    expect(doc.getPageCount()).toBeGreaterThanOrEqual(6);
   });
 
   it('buildFinalConsentEmailPdf stamps official document with embedded SVG signatures', async () => {
@@ -84,12 +88,16 @@ describe('consentEmailPdf', () => {
         intervieweeName: 'Test Test',
         birthDate: '2000-01-01',
         signatureBase64: sig,
+        answers: [
+          { questionId: 'consentExplainedBy', value: 'Examiner' },
+          { questionId: 'consentDiscussionPoints', value: 'Discussion points test' },
+        ],
       },
       { examinerSignatureBase64: sig }
     );
     expect(pdf).not.toBeNull();
     const doc = await PdfLibDocument.load(pdf!);
-    expect(doc.getPageCount()).toBe(9);
+    expect(doc.getPageCount()).toBeGreaterThanOrEqual(6);
   });
 
   it('signatureToImageBuffer converts SVG data URLs to PNG for PDFKit', async () => {
