@@ -16,42 +16,11 @@ import { generatePid } from '../utils/pid';
 import { buildResponseCsv } from '../utils/responseExport';
 import { buildFieldChanges, verifyPostClosePin } from '../utils/audit';
 import { parseEchoScreeningFromBody } from '../utils/shkEchoScreening';
+import { buildResponsesFilterFromQuery } from '../utils/responsesQuery';
+import { listFilterableFields } from '../utils/questionLabels';
 import type { Answer } from '../types';
 
 const router = express.Router();
-function buildWorkflowBucketFilter(bucket: string): Record<string, unknown> | null {
-  if (bucket === 'pending') {
-    return {
-      workflowStatus: { $ne: 'closed' },
-      $or: [
-        { workflowStatus: { $in: ['pending_shk_followup', 'shk_in_progress'] } },
-        {
-          workflowStatus: 'patient_completed',
-          patientBoundedSubmit: true,
-          $or: [
-            { 'shkFollowUp.completedAt': { $exists: false } },
-            { 'shkFollowUp.completedAt': null },
-          ],
-        },
-      ],
-    };
-  }
-  if (bucket === 'done') {
-    return {
-      $or: [
-        { workflowStatus: 'closed' },
-        {
-          workflowStatus: 'patient_completed',
-          $or: [
-            { patientBoundedSubmit: { $ne: true } },
-            { 'shkFollowUp.completedAt': { $exists: true, $ne: null } },
-          ],
-        },
-      ],
-    };
-  }
-  return null;
-}
 
 function transformAnswersForStorage(answersArray: Record<string, unknown>[]): Answer[] {
   return answersArray.map((ans) => {
@@ -282,65 +251,29 @@ router.get('/consent-document/pdf', async (req: Request, res: Response) => {
  *                 limit:
  *                   type: integer
  */
+/** Filter field metadata for web UI (question labels + boolean/number/text). */
+router.get('/meta/filter-fields', authenticate, async (_req: Request, res: Response) => {
+  res.json({ fields: listFilterableFields() });
+});
+
 router.get('/', authenticate, async (req: Request, res: Response) => {
   try {
     const {
-      userId,
-      draft,
-      workflowStatus,
-      workflowBucket,
-      pid,
-      search,
-      completedAtFrom,
-      completedAtTo,
       page = '1',
       limit = '10',
       sortBy = 'createdAt',
       sortOrder = 'desc',
     } = req.query;
 
-    const filter: any = {};
-
-    // Allow filtering by userId if provided, otherwise show all responses
-    if (userId) {
-      filter.userId = userId;
-    }
-
-    if (draft !== undefined) {
-      filter.draft = draft === 'true';
-    }
-    if (workflowStatus) {
-      filter.workflowStatus = workflowStatus;
-    }
-    if (workflowBucket && typeof workflowBucket === 'string') {
-      const bucketFilter = buildWorkflowBucketFilter(workflowBucket);
-      if (bucketFilter) {
-        Object.assign(filter, bucketFilter);
-      }
-    }
-    if (pid) {
-      filter.pid = pid;
-    }
-    if (search) {
-      const regex = new RegExp(String(search), 'i');
-      filter.$or = [
-        { intervieweeName: regex },
-        { intervieweeEmail: regex },
-        { intervieweePhone: regex },
-        { pid: regex },
-        { 'answers.value': regex },
-        { 'answers.questionId': regex },
-      ];
-    }
-
-    if (completedAtFrom || completedAtTo) {
-      filter.completedAt = {};
-      if (completedAtFrom) {
-        filter.completedAt.$gte = new Date(completedAtFrom as string);
-      }
-      if (completedAtTo) {
-        filter.completedAt.$lte = new Date(completedAtTo as string);
-      }
+    const { filter, answerFiltersError } = buildResponsesFilterFromQuery(
+      req.query as Record<string, string | string[] | undefined>
+    );
+    if (answerFiltersError) {
+      res.status(400).json({
+        error: answerFiltersError,
+        code: 'INVALID_ANSWER_FILTERS',
+      });
+      return;
     }
 
     const pageNum = parseInt(page as string, 10);
@@ -1375,59 +1308,15 @@ router.post('/:id/followup/complete', authenticate, async (req: Request, res: Re
  */
 router.get('/export/csv', authenticate, async (req: Request, res: Response) => {
   try {
-    const {
-      userId,
-      draft,
-      workflowStatus,
-      workflowBucket,
-      pid,
-      search,
-      completedAtFrom,
-      completedAtTo,
-    } = req.query;
-
-    const filter: any = {};
-
-    // Allow filtering by userId if provided, otherwise show all responses
-    if (userId) {
-      filter.userId = userId;
-    }
-
-    if (draft !== undefined) {
-      filter.draft = draft === 'true';
-    }
-    if (workflowStatus) {
-      filter.workflowStatus = workflowStatus;
-    }
-    if (workflowBucket && typeof workflowBucket === 'string') {
-      const bucketFilter = buildWorkflowBucketFilter(workflowBucket);
-      if (bucketFilter) {
-        Object.assign(filter, bucketFilter);
-      }
-    }
-    if (pid) {
-      filter.pid = pid;
-    }
-    if (search) {
-      const regex = new RegExp(String(search), 'i');
-      filter.$or = [
-        { intervieweeName: regex },
-        { intervieweeEmail: regex },
-        { intervieweePhone: regex },
-        { pid: regex },
-        { 'answers.value': regex },
-        { 'answers.questionId': regex },
-      ];
-    }
-
-    if (completedAtFrom || completedAtTo) {
-      filter.completedAt = {};
-      if (completedAtFrom) {
-        filter.completedAt.$gte = new Date(completedAtFrom as string);
-      }
-      if (completedAtTo) {
-        filter.completedAt.$lte = new Date(completedAtTo as string);
-      }
+    const { filter, answerFiltersError } = buildResponsesFilterFromQuery(
+      req.query as Record<string, string | string[] | undefined>
+    );
+    if (answerFiltersError) {
+      res.status(400).json({
+        error: answerFiltersError,
+        code: 'INVALID_ANSWER_FILTERS',
+      });
+      return;
     }
 
     const responses = await ResponseModel.find(filter)

@@ -136,6 +136,59 @@ describe('responses routes integration', () => {
     expect(ok.body.response.changeLog[0].reason).toBe('Correction requested by SHK');
   });
 
+  it('answerFilters narrow list and CSV export to matching patients', async () => {
+    if (!mongoReady) {
+      expect(true).toBe(true);
+      return;
+    }
+    const owner = new mongoose.Types.ObjectId();
+    await ResponseModel.create({
+      userId: owner,
+      pid: 'HZB-CHEST-YES',
+      draft: false,
+      workflowStatus: 'closed',
+      answers: [
+        { questionId: 'hasChestComplaints', type: 'SINGLE_CHOICE', value: 'yes' },
+        { questionId: 'painIntensity', type: 'NUMBER', value: 7 },
+      ],
+      intervieweeName: 'Chest Yes High',
+    });
+    await ResponseModel.create({
+      userId: owner,
+      pid: 'HZB-CHEST-NO',
+      draft: false,
+      workflowStatus: 'closed',
+      answers: [
+        { questionId: 'hasChestComplaints', type: 'SINGLE_CHOICE', value: 'no' },
+        { questionId: 'painIntensity', type: 'NUMBER', value: 3 },
+      ],
+      intervieweeName: 'Chest No Low',
+    });
+
+    const filters = encodeURIComponent(
+      JSON.stringify([
+        { questionId: 'hasChestComplaints', op: 'eq', value: 'yes' },
+        { questionId: 'painIntensity', op: 'lte', value: 5 },
+      ])
+    );
+    const listRes = await request(app).get(`/api/responses?answerFilters=${filters}`);
+    expect(listRes.status).toBe(200);
+    expect(listRes.body.total).toBe(0);
+
+    const filters2 = encodeURIComponent(
+      JSON.stringify([{ questionId: 'hasChestComplaints', op: 'eq', value: 'yes' }])
+    );
+    const list2 = await request(app).get(`/api/responses?answerFilters=${filters2}`);
+    expect(list2.status).toBe(200);
+    expect(list2.body.total).toBe(1);
+    expect(list2.body.responses[0].intervieweeName).toBe('Chest Yes High');
+
+    const csvRes = await request(app).get(`/api/responses/export/csv?answerFilters=${filters2}`);
+    expect(csvRes.status).toBe(200);
+    expect(String(csvRes.text)).toContain('Chest Yes High');
+    expect(String(csvRes.text)).not.toContain('Chest No Low');
+  });
+
   it('search finds answers free-text and export respects workflow/pid/search filters', async () => {
     if (!mongoReady) {
       expect(true).toBe(true);

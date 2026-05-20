@@ -1,14 +1,23 @@
 import PDFDocument from 'pdfkit';
 import { PDFDocument as PdfLibDocument, StandardFonts } from 'pdf-lib';
 import { buildConsentPdfBuffer, formatConsentBannerDate } from './consentPatientDocument';
+import { buildPatientQuestionnairePdf } from './patientQuestionnairePdf';
 import { signatureToImageBuffer } from './signatureImage';
 
 export interface ResponseLikeForConsentPdf {
   intervieweeName?: string;
+  pid?: string;
   birthDate?: string;
   completedAt?: Date;
   signatureBase64?: string;
-  answers?: Array<{ questionId: string; value?: unknown; answer?: unknown }>;
+  answers?: Array<{
+    questionId: string;
+    type?: string;
+    value?: unknown;
+    answer?: unknown;
+    imageUri?: string;
+    fileUri?: string;
+  }>;
   /** Populated user doc with `profile.examinerSignatureBase64`, or an ObjectId before populate. */
   userId?: unknown;
 }
@@ -480,6 +489,27 @@ export async function buildFinalConsentEmailPdf(
     } catch (e) {
       console.warn(
         '[consentEmailPdf] Could not stamp official PDF:',
+        (e as Error).message
+      );
+    }
+  }
+
+  const hasPatientAnswers = (doc.answers || []).some(
+    (a) => a?.questionId && a.questionId !== 'signature'
+  );
+  if (hasPatientAnswers) {
+    try {
+      const appendix = await buildPatientQuestionnairePdf({
+        intervieweeName: name || doc.intervieweeName,
+        pid: doc.pid,
+        birthDate: doc.birthDate,
+        answers: doc.answers,
+      });
+      official = await mergePdfBuffers(official, appendix);
+      console.log('[consentEmailPdf] Appended patient questionnaire answers');
+    } catch (e) {
+      console.warn(
+        '[consentEmailPdf] Could not append patient questionnaire:',
         (e as Error).message
       );
     }

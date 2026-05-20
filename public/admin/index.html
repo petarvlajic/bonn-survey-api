@@ -295,6 +295,48 @@
             border: 1px solid #ddd;
             border-radius: 4px;
         }
+
+        .answer-filters {
+            margin-bottom: 20px;
+            padding: 20px;
+            background: #eef6ff;
+            border-radius: 6px;
+            border: 1px solid #c5d9f0;
+        }
+
+        .answer-filters h3 {
+            margin-bottom: 12px;
+            font-size: 16px;
+            color: #1a4a7a;
+        }
+
+        .answer-filter-row {
+            display: grid;
+            grid-template-columns: 2fr 1fr 1fr auto;
+            gap: 10px;
+            align-items: end;
+            margin-bottom: 10px;
+        }
+
+        .answer-filter-row label {
+            font-size: 12px;
+            font-weight: 600;
+            display: block;
+            margin-bottom: 4px;
+        }
+
+        .filter-hint {
+            font-size: 13px;
+            color: #555;
+            margin-bottom: 12px;
+        }
+
+        .filter-actions-row {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-top: 8px;
+        }
     </style>
 </head>
 <body>
@@ -335,6 +377,20 @@
                 <div>
                     <label>Date To:</label>
                     <input type="date" id="dateTo" onchange="loadResponses()" />
+                </div>
+            </div>
+
+            <div class="answer-filters">
+                <h3>Filter nach Antworten (kombinierbar)</h3>
+                <p class="filter-hint">
+                    Jedes Feld schränkt die Liste weiter ein (z.&nbsp;B. Brustbeschwerden = Ja, dann Schmerzintensität ≤ 5).
+                    CSV-Export enthält nur die aktuell gefilterten Patienten.
+                </p>
+                <div id="answerFilterRows"></div>
+                <div class="filter-actions-row">
+                    <button type="button" class="btn-secondary" onclick="addAnswerFilterRow()">+ Filter hinzufügen</button>
+                    <button type="button" class="btn-primary" onclick="applyFilters()">Filter anwenden</button>
+                    <button type="button" class="btn-secondary" onclick="clearAnswerFilters()">Alle Filter löschen</button>
                 </div>
             </div>
 
@@ -389,6 +445,8 @@
         let currentSortOrder = 'desc';
         let allResponses = [];
         let selectedIds = new Set();
+        let filterFields = [];
+        let answerFilters = [];
 
         // Check if already logged in
         if (token) {
@@ -455,6 +513,184 @@
             document.getElementById('userInfo').style.display = 'block';
             document.getElementById('userEmail').textContent = user.email;
             document.getElementById('mainContent').style.display = 'block';
+            loadFilterFields();
+        }
+
+        async function loadFilterFields() {
+            try {
+                const res = await fetch(`${API_BASE}/api/responses/meta/filter-fields`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    filterFields = data.fields || [];
+                    if (answerFilters.length === 0 && filterFields.length > 0) {
+                        addAnswerFilterRow();
+                    } else {
+                        renderAnswerFilterRows();
+                    }
+                }
+            } catch (e) {
+                console.error('Failed to load filter fields', e);
+            }
+        }
+
+        function getFieldMeta(questionId) {
+            return filterFields.find((f) => f.questionId === questionId) || { kind: 'text', label: questionId };
+        }
+
+        function opsForKind(kind) {
+            if (kind === 'boolean') return [{ v: 'eq', l: 'ist' }];
+            if (kind === 'number') {
+                return [
+                    { v: 'eq', l: '=' },
+                    { v: 'lte', l: '≤' },
+                    { v: 'gte', l: '≥' },
+                    { v: 'lt', l: '<' },
+                    { v: 'gt', l: '>' },
+                ];
+            }
+            return [
+                { v: 'contains', l: 'enthält' },
+                { v: 'eq', l: 'ist genau' },
+            ];
+        }
+
+        function addAnswerFilterRow() {
+            const defaultId = filterFields[0]?.questionId || '';
+            answerFilters.push({
+                questionId: defaultId,
+                op: defaultId ? (getFieldMeta(defaultId).kind === 'number' ? 'lte' : 'eq') : 'eq',
+                value: getFieldMeta(defaultId).kind === 'boolean' ? 'yes' : '',
+            });
+            renderAnswerFilterRows();
+        }
+
+        function removeAnswerFilterRow(index) {
+            answerFilters.splice(index, 1);
+            renderAnswerFilterRows();
+        }
+
+        function clearAnswerFilters() {
+            answerFilters = [];
+            renderAnswerFilterRows();
+            currentPage = 1;
+            loadResponses();
+        }
+
+        function applyFilters() {
+            syncAnswerFiltersFromDom();
+            currentPage = 1;
+            loadResponses();
+        }
+
+        function syncAnswerFiltersFromDom() {
+            const rows = document.querySelectorAll('.answer-filter-row');
+            answerFilters = [];
+            rows.forEach((row) => {
+                const q = row.querySelector('.af-question')?.value;
+                const op = row.querySelector('.af-op')?.value;
+                const valEl = row.querySelector('.af-value');
+                let value = valEl?.value;
+                if (value === undefined || value === null || value === '') return;
+                if (getFieldMeta(q).kind === 'number') value = Number(value);
+                answerFilters.push({ questionId: q, op, value });
+            });
+        }
+
+        function renderAnswerFilterRows() {
+            const container = document.getElementById('answerFilterRows');
+            container.innerHTML = '';
+            answerFilters.forEach((af, index) => {
+                const meta = getFieldMeta(af.questionId);
+                const row = document.createElement('div');
+                row.className = 'answer-filter-row';
+                row.dataset.index = String(index);
+
+                const qOptions = filterFields
+                    .map(
+                        (f) =>
+                            `<option value="${f.questionId}" ${f.questionId === af.questionId ? 'selected' : ''}>${escapeHtml(f.label)}</option>`
+                    )
+                    .join('');
+
+                const opOptions = opsForKind(meta.kind)
+                    .map((o) => `<option value="${o.v}" ${o.v === af.op ? 'selected' : ''}>${o.l}</option>`)
+                    .join('');
+
+                let valueControl = '';
+                if (meta.kind === 'boolean') {
+                    const yesSel = af.value === 'yes' || af.value === true ? 'selected' : '';
+                    const noSel = af.value === 'no' || af.value === false ? 'selected' : '';
+                    valueControl = `<select class="af-value"><option value="yes" ${yesSel}>Ja</option><option value="no" ${noSel}>Nein</option></select>`;
+                } else if (meta.kind === 'number') {
+                    valueControl = `<input type="number" class="af-value" min="0" max="10" step="1" value="${af.value ?? ''}" placeholder="0–10" />`;
+                } else {
+                    valueControl = `<input type="text" class="af-value" value="${escapeHtml(String(af.value ?? ''))}" placeholder="Wert..." />`;
+                }
+
+                row.innerHTML = `
+                    <div>
+                        <label>Feld</label>
+                        <select class="af-question" onchange="onAnswerFilterQuestionChange(${index})">${qOptions}</select>
+                    </div>
+                    <div>
+                        <label>Bedingung</label>
+                        <select class="af-op">${opOptions}</select>
+                    </div>
+                    <div>
+                        <label>Wert</label>
+                        ${valueControl}
+                    </div>
+                    <div>
+                        <button type="button" class="btn-danger" onclick="removeAnswerFilterRow(${index})" title="Entfernen">✕</button>
+                    </div>
+                `;
+                container.appendChild(row);
+            });
+        }
+
+        function onAnswerFilterQuestionChange(index) {
+            const row = document.querySelector(`.answer-filter-row[data-index="${index}"]`);
+            if (!row) return;
+            const q = row.querySelector('.af-question').value;
+            const meta = getFieldMeta(q);
+            answerFilters[index] = {
+                questionId: q,
+                op: meta.kind === 'number' ? 'lte' : meta.kind === 'boolean' ? 'eq' : 'contains',
+                value: meta.kind === 'boolean' ? 'yes' : '',
+            };
+            renderAnswerFilterRows();
+        }
+
+        function escapeHtml(s) {
+            return String(s)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        }
+
+        function buildListQueryParams() {
+            syncAnswerFiltersFromDom();
+            const params = new URLSearchParams({
+                page: currentPage.toString(),
+                limit: currentLimit.toString(),
+                sortBy: currentSortBy,
+                sortOrder: currentSortOrder,
+            });
+            const search = document.getElementById('searchInput').value.trim();
+            const workflowBucket = document.getElementById('statusFilter').value;
+            const dateFrom = document.getElementById('dateFrom').value;
+            const dateTo = document.getElementById('dateTo').value;
+            if (workflowBucket) params.append('workflowBucket', workflowBucket);
+            if (dateFrom) params.append('completedAtFrom', dateFrom);
+            if (dateTo) params.append('completedAtTo', dateTo);
+            if (search) params.append('search', search);
+            if (answerFilters.length > 0) {
+                params.append('answerFilters', JSON.stringify(answerFilters));
+            }
+            return params;
         }
 
         let searchTimeout;
@@ -466,26 +702,12 @@
         async function loadResponses() {
             if (!token) return;
 
-            const search = document.getElementById('searchInput').value;
-            const workflowBucket = document.getElementById('statusFilter').value;
-            const dateFrom = document.getElementById('dateFrom').value;
-            const dateTo = document.getElementById('dateTo').value;
-
             document.getElementById('loadingMessage').style.display = 'block';
             document.getElementById('responsesTable').style.display = 'none';
             document.getElementById('errorMessage').innerHTML = '';
 
             try {
-                const params = new URLSearchParams({
-                    page: currentPage.toString(),
-                    limit: currentLimit.toString(),
-                    sortBy: currentSortBy,
-                    sortOrder: currentSortOrder,
-                });
-
-                if (workflowBucket) params.append('workflowBucket', workflowBucket);
-                if (dateFrom) params.append('completedAtFrom', dateFrom);
-                if (dateTo) params.append('completedAtTo', dateTo);
+                const params = buildListQueryParams();
 
                 const response = await fetch(`${API_BASE}/api/responses?${params}`, {
                     headers: {
@@ -497,18 +719,7 @@
 
                 if (response.ok) {
                     allResponses = data.responses;
-                    
-                    // Filter by search term if provided
-                    let filtered = allResponses;
-                    if (search) {
-                        const searchLower = search.toLowerCase();
-                        filtered = allResponses.filter(r => 
-                            (r.intervieweeName && r.intervieweeName.toLowerCase().includes(searchLower)) ||
-                            (r.intervieweeEmail && r.intervieweeEmail.toLowerCase().includes(searchLower))
-                        );
-                    }
-
-                    displayResponses(filtered);
+                    displayResponses(allResponses);
                     displayPagination(data.total, data.page, data.limit);
                 } else {
                     document.getElementById('errorMessage').innerHTML = 
@@ -787,37 +998,33 @@
             loadResponses();
         }
 
-        function exportCSV() {
-            if (allResponses.length === 0) {
-                alert('No data to export');
-                return;
+        async function exportCSV() {
+            if (!token) return;
+            const params = buildListQueryParams();
+            params.delete('page');
+            params.delete('limit');
+            params.delete('sortBy');
+            params.delete('sortOrder');
+
+            try {
+                const response = await fetch(`${API_BASE}/api/responses/export/csv?${params}`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                });
+                if (!response.ok) {
+                    const data = await response.json().catch(() => ({}));
+                    alert(data.error || 'CSV export failed');
+                    return;
+                }
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `survey-responses-${new Date().toISOString().split('T')[0]}.csv`;
+                a.click();
+                window.URL.revokeObjectURL(url);
+            } catch (error) {
+                alert('Network error: ' + error.message);
             }
-
-            const headers = ['ID', 'Interviewer', 'Interviewee Name', 'Interviewee Email', 'Survey Title', 'Status', 'Created At', 'Completed At', 'Has Signature'];
-            const rows = allResponses.map(r => [
-                r._id,
-                r.userId?.email || 'N/A',
-                r.intervieweeName || '',
-                r.intervieweeEmail || '',
-                r.surveyId?.title || 'N/A',
-                r.draft ? 'Draft' : 'Completed',
-                new Date(r.createdAt).toISOString(),
-                r.completedAt ? new Date(r.completedAt).toISOString() : '',
-                r.signatureBase64 ? 'Yes' : 'No'
-            ]);
-
-            const csv = [
-                headers.join(','),
-                ...rows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))
-            ].join('\n');
-
-            const blob = new Blob([csv], { type: 'text/csv' });
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `survey-responses-${new Date().toISOString().split('T')[0]}.csv`;
-            a.click();
-            window.URL.revokeObjectURL(url);
         }
 
         async function exportPDF(id) {

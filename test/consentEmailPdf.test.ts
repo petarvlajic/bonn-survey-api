@@ -9,6 +9,7 @@ import {
   parseDataUrlImageToBuffer,
   stampSignaturesOnOfficialPdf,
 } from '../src/utils/consentEmailPdf';
+import { buildPatientQuestionnairePdf } from '../src/utils/patientQuestionnairePdf';
 import fs from 'fs';
 import path from 'path';
 import { signatureToImageBuffer } from '../src/utils/signatureImage';
@@ -72,6 +73,50 @@ describe('consentEmailPdf', () => {
     });
     const doc = await PdfLibDocument.load(stamped);
     expect(doc.getPageCount()).toBeGreaterThanOrEqual(6);
+  });
+
+  it('buildPatientQuestionnairePdf produces at least one page with answers', async () => {
+    const pdf = await buildPatientQuestionnairePdf({
+      intervieweeName: 'Max Mustermann',
+      birthDate: '01.01.1990',
+      answers: [
+        { questionId: 'name', value: 'Max Mustermann' },
+        { questionId: 'hasChestComplaints', value: 'Ja' },
+        { questionId: 'signature', value: 'data:image/png;base64,abc' },
+      ],
+    });
+    const doc = await PdfLibDocument.load(pdf);
+    expect(doc.getPageCount()).toBeGreaterThanOrEqual(1);
+  });
+
+  it('buildFinalConsentEmailPdf appends patient questionnaire after consent document', async () => {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="80"><path d="M10 40 L190 40" stroke="black" stroke-width="3" fill="none"/></svg>`;
+    const sig = `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`;
+    const bundled = path.join(
+      process.cwd(),
+      'assets/consent/patienteninformation-einwilligung-erwachsene.pdf'
+    );
+    if (!fs.existsSync(bundled)) return;
+
+    const withoutAppendix = await buildFinalConsentEmailPdf({
+      intervieweeName: 'Test Test',
+      signatureBase64: sig,
+      answers: [],
+    });
+    const withAppendix = await buildFinalConsentEmailPdf({
+      intervieweeName: 'Test Test',
+      signatureBase64: sig,
+      answers: [
+        { questionId: 'name', value: 'Test Test' },
+        { questionId: 'hasChestComplaints', value: 'Nein' },
+        { questionId: 'consentExplainedBy', value: 'Examiner' },
+      ],
+    });
+    expect(withoutAppendix).not.toBeNull();
+    expect(withAppendix).not.toBeNull();
+    const pagesWithout = (await PdfLibDocument.load(withoutAppendix!)).getPageCount();
+    const pagesWith = (await PdfLibDocument.load(withAppendix!)).getPageCount();
+    expect(pagesWith).toBeGreaterThan(pagesWithout);
   });
 
   it('buildFinalConsentEmailPdf stamps official document with embedded SVG signatures', async () => {

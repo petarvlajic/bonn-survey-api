@@ -4,63 +4,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { echoScreeningLinesForPdf, parseEchoScreeningStored } from './shkEchoScreening';
 import { signatureToImageBuffer } from './signatureImage';
-
-/**
- * Hardcoded labels — must match mobile app (Step1–Step7 + FormScreen q1–q10).
- * questionId → label as shown in the app.
- */
-const QUESTION_LABELS: Record<string, string> = {
-  // FormScreen / surveyTemplate (q1–q10)
-  q1: 'Interviewee Name',
-  q2: 'Contact Information',
-  q3: 'Age Range',
-  q4: 'Gender',
-  q5: 'Topics of Interest',
-  q6: 'Overall Satisfaction',
-  q7: 'Additional Comments',
-  q8: 'Date of Interview',
-  q9: 'Location',
-  q10: 'Photo (Optional)',
-  // Step 1: General Information
-  name: 'Name',
-  email: 'Email',
-  birthDate: 'Geburtsdatum (Birth Date)',
-  date: 'Datum (Date)',
-  // Step 2: Current Complaints
-  hasChestComplaints: 'Haben Sie derzeit Beschwerden im Brustbereich?',
-  painType: 'Art der Schmerzen (Type of pain)',
-  painTypeOther: 'Specify other pain type',
-  complaintsSince: 'Seit wann bestehen die Beschwerden? (Since when?)',
-  painIntensity: 'Wie stark sind die Schmerzen (0–10)?',
-  complaintsOccur: 'Treten die Beschwerden auf bei: (Complaints occur during)',
-  complaintsDuration: 'Wie lange dauern die Beschwerden an? (Duration)',
-  painRadiation: 'Strahlen die Schmerzen aus? (Pain radiation)',
-  whatHelps: 'Was bessert die Beschwerden? (What helps?)',
-  whatWorsens: 'Was verschlechtert die Beschwerden? (What worsens?)',
-  // Step 3: Accompanying Symptoms
-  accompanyingSymptoms: 'Begleitsymptome (Accompanying Symptoms)',
-  // Step 4: Heart Valve Symptoms
-  breathlessnessOnExertion: 'Haben Sie Atemnot bei körperlicher Belastung?',
-  breathlessnessSince: 'Seit wann? (Since when?)',
-  breathlessnessLying: 'Haben Sie Atemnot im Liegen?',
-  swollenLegs: 'Haben Sie geschwollene Füße oder Beine bemerkt?',
-  pulsingChest: 'Spüren Sie ein Pochen oder Klopfen im Brustkorb?',
-  earNoise: 'Hören Sie ein Rauschen oder Pochen im Ohr?',
-  dizzinessSyncope: 'Haben Sie Schwindel oder Bewusstseinsverluste?',
-  reducedCapacity: 'Haben Sie verminderte körperliche Belastbarkeit bemerkt?',
-  nightCough: 'Leiden Sie unter nächtlichem Husten?',
-  palpitations: 'Haben Sie Herzklopfen oder Herzstolpern?',
-  valveDisease: 'Wurde bei Ihnen bereits eine Herzklappenerkrankung festgestellt?',
-  valveTypes: 'Herzklappenerkrankung (Valve types)',
-  // Step 5: Pre-existing Conditions
-  heartDiseases: 'Bestehen bekannte Herzerkrankungen?',
-  riskFactors: 'Haben Sie folgende Erkrankungen oder Risikofaktoren?',
-  // Step 6: Previous Examinations
-  previousExams: 'Vorangegangene Untersuchungen / Eingriffe',
-  echoFreeText: 'Echokardiographie Freitext',
-  // Step 7
-  signature: 'Signature',
-};
+import { QUESTION_LABELS } from './questionLabels';
 
 const QUESTION_TYPE_LABELS: Record<string, string> = {
   SINGLE_CHOICE: 'Single choice',
