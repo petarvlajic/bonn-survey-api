@@ -1,4 +1,5 @@
 import PDFDocument from 'pdfkit';
+import { formatStoredAnswerValue } from './answerDisplay';
 import { QUESTION_LABELS } from './questionLabels';
 
 /** Display order for patient-filled questionnaire (Cardio Check + Einwilligung). */
@@ -52,37 +53,8 @@ type AnswerRow = {
   fileUri?: string;
 };
 
-function answerValue(row: AnswerRow): unknown {
-  if (row.value !== undefined && row.value !== null && row.value !== '') return row.value;
-  if (row.answer !== undefined && row.answer !== null && row.answer !== '') return row.answer;
-  return undefined;
-}
-
 function formatAnswerForPdf(row: AnswerRow): string {
-  const raw = answerValue(row);
-  const type = row.type || '';
-
-  if (type === 'IMAGE_UPLOAD' || type === 'FILE_UPLOAD') {
-    if (row.imageUri) return String(row.imageUri);
-    if (row.fileUri) return String(row.fileUri);
-    if (typeof raw === 'string' && raw.startsWith('data:')) return '(Foto / Anhang gespeichert)';
-    if (raw != null && String(raw).trim()) return String(raw);
-    return '(Foto / Anhang gespeichert)';
-  }
-
-  if (type === 'MULTIPLE_CHOICE' && Array.isArray(raw)) {
-    return raw.map(String).join(', ');
-  }
-  if (type === 'DATE' && raw) {
-    try {
-      return new Date(raw as string | number).toLocaleDateString('de-DE');
-    } catch {
-      return String(raw);
-    }
-  }
-  if (raw === undefined || raw === null || raw === '') return '—';
-  if (typeof raw === 'boolean') return raw ? 'Ja' : 'Nein';
-  return String(raw);
+  return formatStoredAnswerValue(row);
 }
 
 function questionLabel(questionId: string): string {

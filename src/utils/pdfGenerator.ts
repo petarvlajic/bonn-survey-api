@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { echoScreeningLinesForPdf, parseEchoScreeningStored } from './shkEchoScreening';
 import { signatureToImageBuffer } from './signatureImage';
+import { formatStoredAnswerValue } from './answerDisplay';
 import { QUESTION_LABELS } from './questionLabels';
 
 const QUESTION_TYPE_LABELS: Record<string, string> = {
@@ -28,14 +29,14 @@ function formatQuestionType(type: string): string {
 }
 
 function formatAnswerValue(answer: any): string {
-  if (answer.type === 'MULTIPLE_CHOICE' && Array.isArray(answer.value)) {
-    return answer.value.join(', ');
-  }
-  if (answer.type === 'DATE' && answer.value) {
-    return new Date(answer.value).toLocaleDateString();
-  }
-  if (answer.value === undefined || answer.value === null) return '—';
-  return String(answer.value);
+  return formatStoredAnswerValue({
+    questionId: answer.questionId,
+    type: answer.type,
+    value: answer.value,
+    answer: answer.answer,
+    imageUri: answer.imageUri,
+    fileUri: answer.fileUri,
+  });
 }
 
 /**

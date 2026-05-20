@@ -19,22 +19,12 @@ import { parseEchoScreeningFromBody } from '../utils/shkEchoScreening';
 import { buildResponsesFilterFromQuery } from '../utils/responsesQuery';
 import { listFilterableFields } from '../utils/questionLabels';
 import type { Answer } from '../types';
+import { normalizeAnswersForStorage } from '../utils/answerDisplay';
 
 const router = express.Router();
 
 function transformAnswersForStorage(answersArray: Record<string, unknown>[]): Answer[] {
-  return answersArray.map((ans) => {
-    const transformed: Record<string, unknown> = {
-      questionId: ans.questionId,
-      type: ans.type,
-    };
-    if (ans.answer !== undefined) transformed.value = ans.answer;
-    else if (ans.value !== undefined) transformed.value = ans.value;
-    if (ans.imageUri !== undefined) transformed.imageUri = ans.imageUri;
-    if (ans.fileUri !== undefined) transformed.fileUri = ans.fileUri;
-    if (ans.signatureBase64 !== undefined) transformed.signatureBase64 = ans.signatureBase64;
-    return transformed as unknown as Answer;
-  });
+  return normalizeAnswersForStorage(answersArray) as unknown as Answer[];
 }
 
 const TRACKED_UPDATE_FIELDS = [

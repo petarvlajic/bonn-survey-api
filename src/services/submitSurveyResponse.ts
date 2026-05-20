@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { Response as ResponseModel } from '../models/Response';
+import { normalizeAnswersForStorage } from '../utils/answerDisplay';
 import { generatePid } from '../utils/pid';
 
 export type SubmitSurveyBody = Record<string, unknown>;
@@ -20,18 +21,7 @@ function parseAnswers(body: SubmitSurveyBody) {
   const answersArray =
     (body.answers as unknown[]) || (body.answer ? [body.answer] : []);
 
-  return (answersArray as Record<string, unknown>[]).map((ans) => {
-    const transformed: Record<string, unknown> = {
-      questionId: ans.questionId,
-      type: ans.type,
-    };
-    if (ans.answer !== undefined) transformed.value = ans.answer;
-    else if (ans.value !== undefined) transformed.value = ans.value;
-    if (ans.imageUri !== undefined) transformed.imageUri = ans.imageUri;
-    if (ans.fileUri !== undefined) transformed.fileUri = ans.fileUri;
-    if (ans.signatureBase64 !== undefined) transformed.signatureBase64 = ans.signatureBase64;
-    return transformed;
-  });
+  return normalizeAnswersForStorage(answersArray as Record<string, unknown>[]);
 }
 
 export async function submitSurveyResponseFromBody(
