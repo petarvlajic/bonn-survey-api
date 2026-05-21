@@ -610,9 +610,19 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
       // Consent email: server-built PDF = Unterschriftenblatt + official UKB document (not the client HTML template PDF).
       if (!finalDraft && response.intervieweeEmail && consentPdfBase64 && !useBoundedPatientFlow) {
         try {
+          const submitterProfile = (req.user as {
+            profile?: {
+              firstName?: string;
+              lastName?: string;
+              examinerSignatureBase64?: string;
+            };
+          })?.profile;
           const mergedConsent = await buildFinalConsentEmailPdf(response, {
-            examinerSignatureBase64: (req.user as { profile?: { examinerSignatureBase64?: string } })
-              ?.profile?.examinerSignatureBase64,
+            examinerSignatureBase64: submitterProfile?.examinerSignatureBase64,
+            examinerName: [submitterProfile?.firstName, submitterProfile?.lastName]
+              .filter(Boolean)
+              .join(' ')
+              .trim() || undefined,
           });
           const base64Part = consentPdfBase64.includes(',')
             ? consentPdfBase64.split(',')[1]

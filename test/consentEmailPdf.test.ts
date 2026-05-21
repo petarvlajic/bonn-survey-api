@@ -3,6 +3,7 @@ import PDFDocument from 'pdfkit';
 import { PDFDocument as PdfLibDocument } from 'pdf-lib';
 import {
   buildFinalConsentEmailPdf,
+  consentDiscussionForPdfStamp,
   consentIntroPageIndex,
   consentSignaturePageIndex,
   mergePdfBuffers,
@@ -27,6 +28,15 @@ async function onePagePdf(label: string): Promise<Buffer> {
 }
 
 describe('consentEmailPdf', () => {
+  it('consentDiscussionForPdfStamp treats „Keine“ as empty', () => {
+    expect(consentDiscussionForPdfStamp('Keine')).toBe('');
+    expect(consentDiscussionForPdfStamp('  keine  ')).toBe('');
+    expect(consentDiscussionForPdfStamp('')).toBe('');
+    expect(consentDiscussionForPdfStamp('Freiwilligkeit erläutert')).toBe(
+      'Freiwilligkeit erläutert'
+    );
+  });
+
   it('mergePdfBuffers appends all pages from both inputs', async () => {
     const front = await onePagePdf('cover');
     const back = await onePagePdf('official');

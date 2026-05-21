@@ -239,7 +239,7 @@ export async function stampConsentIntroOnOfficialPdf(
   params: { informedByName: string; discussionPoints: string }
 ): Promise<Buffer> {
   const name = params.informedByName.trim();
-  const discussion = params.discussionPoints.trim();
+  const discussion = consentDiscussionForPdfStamp(params.discussionPoints);
   if (!name && !discussion) return officialPdf;
 
   const doc = await PdfLibDocument.load(officialPdf);
@@ -375,9 +375,17 @@ function participantSignatureRaw(doc: ResponseLikeForConsentPdf): string {
   return legacy || '';
 }
 
+/** Treat default „Keine“ as no extra discussion to stamp on the UKB PDF. */
+export function consentDiscussionForPdfStamp(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return '';
+  if (/^keine$/i.test(trimmed)) return '';
+  return trimmed;
+}
+
 function consentDiscussionPointsFromDoc(doc: ResponseLikeForConsentPdf): string {
   const answer = doc.answers?.find((a) => a.questionId === 'consentDiscussionPoints');
-  return answerString(answer);
+  return consentDiscussionForPdfStamp(answerString(answer));
 }
 
 function examinerNameFromDoc(
