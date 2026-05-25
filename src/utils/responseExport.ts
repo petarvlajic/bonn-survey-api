@@ -7,6 +7,7 @@ interface ExportableResponse {
   _id: { toString(): string } | string;
   pid?: string;
   birthDate?: string;
+  gender?: string;
   intervieweeName?: string;
   intervieweeEmail?: string;
   intervieweePhone?: string;
@@ -50,6 +51,7 @@ export const buildResponseCsv = (responses: ExportableResponse[]): string => {
     'Interviewee Email',
     'Interviewee Phone',
     'Birth Date',
+    'Gender',
     'Status',
     'Created At',
     'Completed At',
@@ -75,6 +77,7 @@ export const buildResponseCsv = (responses: ExportableResponse[]): string => {
       response.intervieweeEmail || '',
       response.intervieweePhone || '',
       response.birthDate || '',
+      response.gender || '',
       response.draft ? 'Draft' : 'Completed',
       response.createdAt.toISOString(),
       response.completedAt ? response.completedAt.toISOString() : '',

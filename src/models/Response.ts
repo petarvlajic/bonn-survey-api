@@ -8,6 +8,8 @@ export interface IResponse extends Document {
   pid?: string;
   /** Birth date (YYYY-MM-DD) – used for consent PDF password and reporting */
   birthDate?: string;
+  /** Patient gender code: male | female | diverse | other | prefer_not_to_say */
+  gender?: string;
   answers: Answer[];
   signatureBase64?: string;
   draft: boolean;
@@ -78,6 +80,10 @@ const ResponseSchema = new Schema<IResponse>(
       trim: true,
     },
     birthDate: {
+      type: String,
+      trim: true,
+    },
+    gender: {
       type: String,
       trim: true,
     },

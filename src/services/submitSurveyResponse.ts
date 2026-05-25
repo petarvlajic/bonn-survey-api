@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import { Response as ResponseModel } from '../models/Response';
 import { normalizeAnswersForStorage } from '../utils/answerDisplay';
 import { generatePid } from '../utils/pid';
+import { extractGenderFromAnswers, isValidGender } from '../utils/gender';
 
 export type SubmitSurveyBody = Record<string, unknown>;
 
@@ -31,6 +32,7 @@ export async function submitSurveyResponseFromBody(
   const {
     pid,
     birthDate,
+    gender,
     consentPdfBase64,
     signatureBase64,
     signature,
@@ -44,6 +46,22 @@ export async function submitSurveyResponseFromBody(
   } = body;
 
   const transformedAnswers = parseAnswers(body);
+
+  if (gender !== undefined && gender !== null && gender !== '' && !isValidGender(gender)) {
+    return {
+      ok: false,
+      status: 400,
+      payload: {
+        error: 'Invalid gender',
+        code: 'INVALID_GENDER',
+        message: 'gender must be one of: male, female, diverse, other, prefer_not_to_say',
+        field: 'gender',
+      },
+    };
+  }
+  const effectiveGender =
+    (isValidGender(gender) ? gender : undefined) ||
+    extractGenderFromAnswers(transformedAnswers);
 
   let finalDraft = draft;
   if (status === 'completed' || status === 'submitted') {
@@ -208,6 +226,7 @@ export async function submitSurveyResponseFromBody(
     userId: options.userId,
     pid: effectivePid,
     birthDate: birthDate as string | undefined,
+    gender: effectiveGender,
     answers: transformedAnswers,
     signatureBase64: finalSignatureBase64,
     draft: finalDraft,

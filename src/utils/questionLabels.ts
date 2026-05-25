@@ -13,6 +13,7 @@ export const QUESTION_LABELS: Record<string, string> = {
   name: 'Name',
   email: 'Email',
   birthDate: 'Geburtsdatum (Birth Date)',
+  gender: 'Geschlecht (Gender)',
   date: 'Datum (Date)',
   hasChestComplaints: 'Haben Sie derzeit Beschwerden im Brustbereich?',
   painType: 'Art der Schmerzen (Type of pain)',

@@ -11,6 +11,7 @@ describe('buildResponseCsv', () => {
         intervieweeEmail: 'ana@example.com',
         intervieweePhone: '123',
         birthDate: '1990-01-01',
+        gender: 'female',
         draft: false,
         createdAt: new Date('2026-03-11T12:00:00.000Z'),
         completedAt: new Date('2026-03-11T13:00:00.000Z'),
@@ -29,6 +30,8 @@ describe('buildResponseCsv', () => {
     expect(csv).toContain('"Q_q2"');
     expect(csv).toContain('"text value"');
     expect(csv).toContain('"a | b"');
+    expect(csv).toContain('"Gender"');
+    expect(csv).toContain('"female"');
     expect(csv).toContain('"HZB-20260311-ABCD"');
     expect(csv).toContain('"Completed"');
   });

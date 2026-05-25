@@ -20,6 +20,7 @@ import { buildResponsesFilterFromQuery } from '../utils/responsesQuery';
 import { listFilterableFields } from '../utils/questionLabels';
 import type { Answer } from '../types';
 import { normalizeAnswersForStorage } from '../utils/answerDisplay';
+import { extractGenderFromAnswers, isValidGender } from '../utils/gender';
 
 const router = express.Router();
 
@@ -37,6 +38,7 @@ const TRACKED_UPDATE_FIELDS = [
   'intervieweePhone',
   'pid',
   'birthDate',
+  'gender',
 ] as const;
 
 const shouldSendSurveyCompletionEmail = process.env.SEND_SURVEY_COMPLETION_EMAIL === 'true';
@@ -401,6 +403,7 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
       answer, // Support both plural and singular
       pid,
       birthDate,
+      gender,
       consentPdfBase64,
       signatureBase64,
       signature, // Support both signatureBase64 and signature
@@ -417,6 +420,19 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
     const answersArray = answers || (answer ? [answer] : []);
 
     const transformedAnswers = transformAnswersForStorage(answersArray as Record<string, unknown>[]);
+
+    if (gender !== undefined && gender !== null && gender !== '' && !isValidGender(gender)) {
+      res.status(400).json({
+        error: 'Invalid gender',
+        code: 'INVALID_GENDER',
+        message: 'gender must be one of: male, female, diverse, other, prefer_not_to_say',
+        field: 'gender',
+      });
+      return;
+    }
+    const effectiveGender =
+      (isValidGender(gender) ? gender : undefined) ||
+      extractGenderFromAnswers(transformedAnswers);
 
     // Determine draft status: if status is "completed", set draft to false
     let finalDraft = draft;
@@ -553,6 +569,7 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
       userId: req.user!._id,
       pid: effectivePid,
       birthDate,
+      gender: effectiveGender,
       answers: transformedAnswers,
       signatureBase64: finalSignatureBase64,
       draft: finalDraft,
@@ -741,6 +758,7 @@ router.put('/:id', authenticate, async (req: Request, res: Response) => {
       intervieweePhone,
       pid,
       birthDate,
+      gender,
       editPin,
       changeReason,
     } = req.body;
@@ -813,7 +831,18 @@ router.put('/:id', authenticate, async (req: Request, res: Response) => {
       intervieweePhone: response.intervieweePhone,
       pid: response.pid,
       birthDate: response.birthDate,
+      gender: response.gender,
     };
+
+    if (gender !== undefined && gender !== null && gender !== '' && !isValidGender(gender)) {
+      res.status(400).json({
+        error: 'Invalid gender',
+        code: 'INVALID_GENDER',
+        message: 'gender must be one of: male, female, diverse, other, prefer_not_to_say',
+        field: 'gender',
+      });
+      return;
+    }
 
     if (answers !== undefined) {
       response.answers = transformAnswersForStorage(answers as Record<string, unknown>[]);
@@ -826,6 +855,12 @@ router.put('/:id', authenticate, async (req: Request, res: Response) => {
     if (intervieweePhone !== undefined) response.intervieweePhone = intervieweePhone;
     if (pid !== undefined) response.pid = pid;
     if (birthDate !== undefined) response.birthDate = birthDate;
+    if (gender !== undefined) {
+      response.gender = isValidGender(gender) ? gender : undefined;
+    } else if (answers !== undefined) {
+      const fromAnswers = extractGenderFromAnswers(response.answers);
+      if (fromAnswers) response.gender = fromAnswers;
+    }
 
     const afterState = {
       answers: response.answers,
@@ -837,6 +872,7 @@ router.put('/:id', authenticate, async (req: Request, res: Response) => {
       intervieweePhone: response.intervieweePhone,
       pid: response.pid,
       birthDate: response.birthDate,
+      gender: response.gender,
     };
     const fieldChanges = buildFieldChanges(
       beforeState as Record<string, unknown>,
