@@ -10,7 +10,11 @@ import {
   buildConsentPdfBuffer,
   ConsentDocxMissingError,
 } from '../utils/consentPatientDocument';
-import { sendConsentEmailWithPdf, sendSurveyCompletionEmail } from '../utils/email';
+import {
+  sendConsentEmailWithPdf,
+  sendPathologicalFindingReportEmail,
+  sendSurveyCompletionEmail,
+} from '../utils/email';
 import { buildFinalConsentEmailPdf } from '../utils/consentEmailPdf';
 import { generatePid } from '../utils/pid';
 import { buildResponseCsv } from '../utils/responseExport';
@@ -1246,6 +1250,82 @@ router.post('/:id/close', authenticate, async (req: Request, res: Response) => {
   }
 });
 
+/** Update SHK echo screening (e.g. edit after closed with PIN on client). */
+router.put('/:id/followup', authenticate, async (req: Request, res: Response) => {
+  try {
+    if (!req.params.id || req.params.id.length !== 24) {
+      res.status(400).json({ error: 'Invalid response ID', code: 'INVALID_ID' });
+      return;
+    }
+
+    const response = await ResponseModel.findById(req.params.id);
+    if (!response) {
+      res.status(404).json({ error: 'Response not found', code: 'RESPONSE_NOT_FOUND' });
+      return;
+    }
+
+    if (!response.patientBoundedSubmit) {
+      res.status(400).json({
+        error: 'Follow-up applies only to patient-bounded responses',
+        code: 'NOT_PATIENT_BOUNDED',
+      });
+      return;
+    }
+
+    if (response.workflowStatus === 'closed') {
+      if (!verifyPostClosePin(req.body.editPin)) {
+        res.status(403).json({ error: 'PIN required', code: 'PIN_REQUIRED' });
+        return;
+      }
+      if (!req.body.changeReason || typeof req.body.changeReason !== 'string' || !req.body.changeReason.trim()) {
+        res.status(400).json({ error: 'changeReason is required', code: 'CHANGE_REASON_REQUIRED' });
+        return;
+      }
+    }
+
+    const parsedEcho = parseEchoScreeningFromBody(req.body);
+    if (!parsedEcho.ok) {
+      res.status(400).json({
+        error: parsedEcho.error,
+        code: parsedEcho.code ?? 'ECHO_SCREENING_INVALID',
+      });
+      return;
+    }
+
+    const pathologicalFindingReport =
+      req.body.pathologicalFindingReport === true ||
+      req.body.pathologicalFindingReport === 'true';
+
+    response.shkFollowUp = {
+      ...response.shkFollowUp,
+      echoScreening: parsedEcho.value,
+      completedAt: response.shkFollowUp?.completedAt ?? new Date(),
+    };
+    if (pathologicalFindingReport) {
+      response.pathologicalFindingReport = true;
+    }
+
+    await response.save();
+
+    if (pathologicalFindingReport) {
+      try {
+        const pdfBuffer = await generateResponsePDF(response, false);
+        await sendPathologicalFindingReportEmail(pdfBuffer, {
+          pid: response.pid,
+          intervieweeName: response.intervieweeName,
+        });
+      } catch (mailErr: unknown) {
+        console.error('[API] Pathological finding email failed:', (mailErr as Error).message);
+      }
+    }
+
+    await response.populate('userId', 'email profile.firstName profile.lastName profile.examinerSignatureBase64');
+    res.json({ message: 'Follow-up updated', response });
+  } catch (error) {
+    throw error;
+  }
+});
+
 // Complete SHK follow-up (patient-bounded flow) — sends deferred consent + survey emails.
 router.post('/:id/followup/complete', authenticate, async (req: Request, res: Response) => {
   try {
@@ -1299,10 +1379,17 @@ router.post('/:id/followup/complete', authenticate, async (req: Request, res: Re
       return;
     }
 
+    const pathologicalFindingReport =
+      req.body.pathologicalFindingReport === true ||
+      req.body.pathologicalFindingReport === 'true';
+
     response.shkFollowUp = {
       echoScreening: parsedEcho.value,
       completedAt: new Date(),
     };
+    if (pathologicalFindingReport) {
+      response.pathologicalFindingReport = true;
+    }
     response.workflowStatus = 'closed';
     response.closedAt = new Date();
     response.lockedBy = undefined;
@@ -1310,6 +1397,21 @@ router.post('/:id/followup/complete', authenticate, async (req: Request, res: Re
 
     await response.save();
     await sendDeferredPatientBoundedEmails(String(response._id), String(req.user!._id));
+
+    if (pathologicalFindingReport) {
+      try {
+        const refreshed = await ResponseModel.findById(response._id);
+        if (refreshed) {
+          const pdfBuffer = await generateResponsePDF(refreshed, false);
+          await sendPathologicalFindingReportEmail(pdfBuffer, {
+            pid: refreshed.pid,
+            intervieweeName: refreshed.intervieweeName,
+          });
+        }
+      } catch (mailErr: unknown) {
+        console.error('[API] Pathological finding email failed:', (mailErr as Error).message);
+      }
+    }
 
     await response.populate('userId', 'email profile.firstName profile.lastName profile.examinerSignatureBase64');
     res.json({

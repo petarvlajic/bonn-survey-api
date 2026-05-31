@@ -10,6 +10,8 @@ export interface IResponse extends Document {
   birthDate?: string;
   /** Patient gender code: male | female | diverse | other | prefer_not_to_say */
   gender?: string;
+  /** SHK flagged pathological / control-required finding — orange tag on web + nachverfolgung email */
+  pathologicalFindingReport?: boolean;
   answers: Answer[];
   signatureBase64?: string;
   draft: boolean;
@@ -86,6 +88,10 @@ const ResponseSchema = new Schema<IResponse>(
     gender: {
       type: String,
       trim: true,
+    },
+    pathologicalFindingReport: {
+      type: Boolean,
+      default: false,
     },
     answers: {
       type: [AnswerSchema],

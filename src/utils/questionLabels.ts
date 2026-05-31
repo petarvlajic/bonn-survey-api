@@ -59,7 +59,6 @@ const BOOLEAN_QUESTION_IDS = new Set([
   'nightCough',
   'palpitations',
   'valveDisease',
-  'heartDiseases',
 ]);
 
 const NUMBER_QUESTION_IDS = new Set(['painIntensity', 'q6']);

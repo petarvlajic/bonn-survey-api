@@ -390,6 +390,44 @@ University Hospital Bonn
   });
 };
 
+const PATHOLOGICAL_FINDING_INBOX =
+  process.env.PATHOLOGICAL_FINDING_EMAIL || 'herzcheck.nachverfolgung@ukbonn.de';
+
+/**
+ * Notify UKB nachverfolgung with full patient + SHK questionnaire PDF.
+ */
+export const sendPathologicalFindingReportEmail = async (
+  pdfBuffer: Buffer,
+  meta: { pid?: string; intervieweeName?: string }
+): Promise<void> => {
+  const subject = `Herz Check Bonn – Kontrollbedürftiger / pathologischer Befund${meta.pid ? ` (${meta.pid})` : ''}`;
+  const name = meta.intervieweeName || 'Unbekannt';
+  const html = `
+    <p>Es wurde ein <strong>kontrollbedürftiger / pathologischer Befund</strong> im Echo-Screening gemeldet.</p>
+    <p><strong>Patient/in:</strong> ${name}<br/>
+    <strong>PID:</strong> ${meta.pid || '—'}</p>
+    <p>Im Anhang: vollständiger Fragebogen (Patient + SHK).</p>
+  `;
+  const text = `Kontrollbedürftiger/pathologischer Befund\nPatient/in: ${name}\nPID: ${meta.pid || '—'}\n\nPDF im Anhang.`;
+
+  await sendEmail(
+    {
+      to: PATHOLOGICAL_FINDING_INBOX,
+      subject,
+      text,
+      html,
+      attachments: [
+        {
+          filename: `herz-check-befund-${meta.pid || 'export'}-${new Date().toISOString().split('T')[0]}.pdf`,
+          content: pdfBuffer,
+          contentType: 'application/pdf',
+        },
+      ],
+    },
+    'pathological-finding-report'
+  );
+};
+
 /**
  * Send password reset email (same SMTP transport as consent PDF mail).
  * Link opens the app: ukbonnsurvey://reset-password?token=…

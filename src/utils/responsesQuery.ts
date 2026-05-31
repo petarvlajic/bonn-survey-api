@@ -1,5 +1,19 @@
 import { applyAnswerFiltersToMongo, parseAnswerFilters } from './answerFilters';
 
+function startOfDayUtc(isoDate: string): Date {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate.trim());
+  if (m) return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 0, 0, 0, 0));
+  const d = new Date(isoDate);
+  return Number.isNaN(d.getTime()) ? d : new Date(d.setUTCHours(0, 0, 0, 0));
+}
+
+function endOfDayUtc(isoDate: string): Date {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate.trim());
+  if (m) return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 23, 59, 59, 999));
+  const d = new Date(isoDate);
+  return Number.isNaN(d.getTime()) ? d : new Date(d.setUTCHours(23, 59, 59, 999));
+}
+
 export type ResponsesQueryInput = Record<string, string | string[] | undefined>;
 
 export function buildWorkflowBucketFilter(bucket: string): Record<string, unknown> | null {
@@ -79,10 +93,23 @@ export function buildResponsesFilterFromQuery(
   if (completedAtFrom || completedAtTo) {
     filter.completedAt = {};
     if (completedAtFrom && typeof completedAtFrom === 'string') {
-      (filter.completedAt as Record<string, Date>).$gte = new Date(completedAtFrom);
+      (filter.completedAt as Record<string, Date>).$gte = startOfDayUtc(completedAtFrom);
     }
     if (completedAtTo && typeof completedAtTo === 'string') {
-      (filter.completedAt as Record<string, Date>).$lte = new Date(completedAtTo);
+      (filter.completedAt as Record<string, Date>).$lte = endOfDayUtc(completedAtTo);
+    }
+  }
+
+  const createdAtFrom =
+    query.createdAtFrom || query.startDate;
+  const createdAtTo = query.createdAtTo || query.endDate;
+  if (createdAtFrom || createdAtTo) {
+    filter.createdAt = {};
+    if (createdAtFrom && typeof createdAtFrom === 'string') {
+      (filter.createdAt as Record<string, Date>).$gte = startOfDayUtc(createdAtFrom);
+    }
+    if (createdAtTo && typeof createdAtTo === 'string') {
+      (filter.createdAt as Record<string, Date>).$lte = endOfDayUtc(createdAtTo);
     }
   }
 
