@@ -21,6 +21,7 @@ export interface IResponse extends Document {
   intervieweeName?: string;
   intervieweeEmail?: string;
   intervieweePhone?: string;
+  intervieweeAddress?: string;
   workflowStatus:
     | 'patient_in_progress'
     | 'patient_completed'
@@ -127,6 +128,10 @@ const ResponseSchema = new Schema<IResponse>(
       },
     },
     intervieweePhone: {
+      type: String,
+      trim: true,
+    },
+    intervieweeAddress: {
       type: String,
       trim: true,
     },

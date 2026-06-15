@@ -1,18 +1,64 @@
 /**
- * SHK echocardiography screening checklist (Nachgespräch) — matches clinical paper form.
+ * SHK echocardiography screening (Nachgespräch) — Herz Check Bonn form 260601.
  * Sent on POST /responses/:id/followup/complete as `echoScreening`.
  */
 
 export const ECHO_MAIN_ROW_IDS = [
   'lv_function',
+  'wall_motion',
   'aortic_valve',
   'mitral_valve',
   'tricuspid_valve',
-  'wall_motion',
+  'ascending_aorta',
 ] as const;
 
 export type EchoMainRowId = (typeof ECHO_MAIN_ROW_IDS)[number];
 
+export type EchoBinaryValue = 'unauffaellig' | 'auffaellig';
+export type EchoValveValue = 'unauffaellig' | 'stenose' | 'insuffizienz' | 'auffaellig';
+export type EchoTricuspidValue = 'unauffaellig' | 'insuffizienz' | 'auffaellig';
+export type EchoAortaValue = 'unauffaellig' | 'dilatiert';
+
+export type EchoMainValues = {
+  lv_function: EchoBinaryValue;
+  wall_motion: EchoBinaryValue;
+  aortic_valve: EchoValveValue;
+  mitral_valve: EchoValveValue;
+  tricuspid_valve: EchoTricuspidValue;
+  ascending_aorta: EchoAortaValue;
+};
+
+export const ECHO_BINARY_LABELS: Record<
+  'lv_function' | 'wall_motion',
+  { unauffaellig: string; auffaellig: string }
+> = {
+  lv_function: {
+    unauffaellig: 'normale systolische Funktion',
+    auffaellig: 'reduziert',
+  },
+  wall_motion: {
+    unauffaellig: 'normokinetisch',
+    auffaellig: 'Wandbewegungsstörung',
+  },
+};
+
+export const ECHO_VALVE_OPTIONS: ReadonlyArray<{ value: EchoValveValue; labelDe: string }> = [
+  { value: 'unauffaellig', labelDe: 'unauffällig — keine relevante Stenose/Insuffizienz' },
+  { value: 'stenose', labelDe: 'auffällig — V.a. Stenose' },
+  { value: 'insuffizienz', labelDe: 'auffällig — V.a. Insuffizienz' },
+];
+
+export const ECHO_TRICUSPID_OPTIONS: ReadonlyArray<{ value: EchoTricuspidValue; labelDe: string }> = [
+  { value: 'unauffaellig', labelDe: 'unauffällig — keine relevante Insuffizienz' },
+  { value: 'insuffizienz', labelDe: 'auffällig — V.a. Insuffizienz' },
+];
+
+export const ECHO_AORTA_OPTIONS: ReadonlyArray<{ value: EchoAortaValue; labelDe: string }> = [
+  { value: 'unauffaellig', labelDe: 'unauffällig' },
+  { value: 'dilatiert', labelDe: 'dilatiert/ektatisch' },
+];
+
+/** @deprecated Use row-specific configs; kept for PDF row titles. */
 export const ECHO_MAIN_ROWS: ReadonlyArray<{
   id: EchoMainRowId;
   categoryDe: string;
@@ -22,32 +68,38 @@ export const ECHO_MAIN_ROWS: ReadonlyArray<{
   {
     id: 'lv_function',
     categoryDe: 'LV-Funktion',
-    unauffaelligDe: 'normale systolische Funktion',
-    auffaelligDe: 'reduziert',
+    unauffaelligDe: ECHO_BINARY_LABELS.lv_function.unauffaellig,
+    auffaelligDe: ECHO_BINARY_LABELS.lv_function.auffaellig,
+  },
+  {
+    id: 'wall_motion',
+    categoryDe: 'Wandbewegung',
+    unauffaelligDe: ECHO_BINARY_LABELS.wall_motion.unauffaellig,
+    auffaelligDe: ECHO_BINARY_LABELS.wall_motion.auffaellig,
   },
   {
     id: 'aortic_valve',
     categoryDe: 'Aortenklappe',
     unauffaelligDe: 'keine relevante Stenose/Insuffizienz',
-    auffaelligDe: 'pathologischer Befund',
+    auffaelligDe: 'V.a. Stenose / Insuffizienz',
   },
   {
     id: 'mitral_valve',
     categoryDe: 'Mitralklappe',
     unauffaelligDe: 'keine relevante Stenose/Insuffizienz',
-    auffaelligDe: 'pathologischer Befund',
+    auffaelligDe: 'V.a. Stenose / Insuffizienz',
   },
   {
     id: 'tricuspid_valve',
     categoryDe: 'Trikuspidalklappe',
     unauffaelligDe: 'keine relevante Insuffizienz',
-    auffaelligDe: 'pathologischer Befund',
+    auffaelligDe: 'V.a. Insuffizienz',
   },
   {
-    id: 'wall_motion',
-    categoryDe: 'Wandbewegung',
-    unauffaelligDe: 'normokinetisch',
-    auffaelligDe: 'Wandbewegungsstörung',
+    id: 'ascending_aorta',
+    categoryDe: 'Aorta ascendens',
+    unauffaelligDe: 'unauffällig',
+    auffaelligDe: 'dilatiert/ektatisch',
   },
 ];
 
@@ -69,10 +121,46 @@ export const ECHO_OVERALL: ReadonlyArray<{ id: EchoOverall; labelDe: string }> =
 ];
 
 export type EchoScreeningPayload = {
-  main: Record<EchoMainRowId, 'unauffaellig' | 'auffaellig'>;
+  main: EchoMainValues;
   optional: Record<EchoOptionalId, boolean>;
+  comment?: string;
   overall: EchoOverall;
 };
+
+const BINARY_IDS = new Set<EchoMainRowId>(['lv_function', 'wall_motion']);
+const VALVE_IDS = new Set<EchoMainRowId>(['aortic_valve', 'mitral_valve']);
+
+function isValidBinary(v: unknown): v is EchoBinaryValue {
+  return v === 'unauffaellig' || v === 'auffaellig';
+}
+
+function isValidValve(v: unknown): v is EchoValveValue {
+  return v === 'unauffaellig' || v === 'stenose' || v === 'insuffizienz' || v === 'auffaellig';
+}
+
+function isValidTricuspid(v: unknown): v is EchoTricuspidValue {
+  return v === 'unauffaellig' || v === 'insuffizienz' || v === 'auffaellig';
+}
+
+function isValidAorta(v: unknown): v is EchoAortaValue {
+  return v === 'unauffaellig' || v === 'dilatiert';
+}
+
+function validateMainRow(id: EchoMainRowId, v: unknown): v is EchoMainValues[typeof id] {
+  if (BINARY_IDS.has(id)) return isValidBinary(v);
+  if (VALVE_IDS.has(id)) return isValidValve(v);
+  if (id === 'tricuspid_valve') return isValidTricuspid(v);
+  if (id === 'ascending_aorta') return isValidAorta(v);
+  return false;
+}
+
+function normalizeStoredMain(mainRaw: Record<string, unknown>): Record<string, unknown> {
+  const main = { ...mainRaw };
+  if (!main.ascending_aorta) {
+    main.ascending_aorta = 'unauffaellig';
+  }
+  return main;
+}
 
 export function parseEchoScreeningFromBody(body: unknown):
   | { ok: true; value: EchoScreeningPayload }
@@ -92,21 +180,23 @@ export function parseEchoScreeningFromBody(body: unknown):
   const mainRaw = o.main;
   const optRaw = o.optional;
   const overallRaw = o.overall;
+  const commentRaw = o.comment;
 
   if (!mainRaw || typeof mainRaw !== 'object') {
     return { ok: false, error: 'echoScreening.main object required', code: 'ECHO_MAIN_REQUIRED' };
   }
-  const main: Partial<Record<EchoMainRowId, 'unauffaellig' | 'auffaellig'>> = {};
+
+  const main = {} as EchoMainValues;
   for (const id of ECHO_MAIN_ROW_IDS) {
     const v = (mainRaw as Record<string, unknown>)[id];
-    if (v !== 'unauffaellig' && v !== 'auffaellig') {
+    if (!validateMainRow(id, v)) {
       return {
         ok: false,
-        error: `Für "${id}" muss genau eine Auswahl getroffen werden (unauffaellig oder auffaellig).`,
+        error: `Für "${id}" muss genau eine gültige Auswahl getroffen werden.`,
         code: 'ECHO_MAIN_INCOMPLETE',
       };
     }
-    main[id] = v;
+    (main as Record<EchoMainRowId, string>)[id] = v as string;
   }
 
   const optional: Record<EchoOptionalId, boolean> = {
@@ -128,25 +218,30 @@ export function parseEchoScreeningFromBody(body: unknown):
     };
   }
 
+  const comment =
+    typeof commentRaw === 'string' && commentRaw.trim() ? commentRaw.trim() : undefined;
+
   return {
     ok: true,
     value: {
-      main: main as Record<EchoMainRowId, 'unauffaellig' | 'auffaellig'>,
+      main: main,
       optional,
+      comment,
       overall: overallRaw,
     },
   };
 }
 
-/** All main rows unremarkable, no optional flags, normal overall — for tests and fixtures. */
+/** All main rows unremarkable — for tests and fixtures. */
 export function validEchoScreeningFixture(): EchoScreeningPayload {
   return {
     main: {
       lv_function: 'unauffaellig',
+      wall_motion: 'unauffaellig',
       aortic_valve: 'unauffaellig',
       mitral_valve: 'unauffaellig',
       tricuspid_valve: 'unauffaellig',
-      wall_motion: 'unauffaellig',
+      ascending_aorta: 'unauffaellig',
     },
     optional: {
       pericardial_effusion: false,
@@ -157,9 +252,40 @@ export function validEchoScreeningFixture(): EchoScreeningPayload {
   };
 }
 
-/** Best-effort parse of persisted `shkFollowUp.echoScreening` (same shape as request body). */
+function formatMainValueForPdf(id: EchoMainRowId, v: string): string {
+  if (BINARY_IDS.has(id)) {
+    const labels = ECHO_BINARY_LABELS[id as 'lv_function' | 'wall_motion'];
+    return v === 'unauffaellig'
+      ? `unauffällig — ${labels.unauffaellig}`
+      : `auffällig — ${labels.auffaellig}`;
+  }
+  if (VALVE_IDS.has(id)) {
+    const opt = ECHO_VALVE_OPTIONS.find((x) => x.value === v);
+    if (opt) return opt.labelDe;
+    if (v === 'auffaellig') return 'auffällig (legacy)';
+    return v;
+  }
+  if (id === 'tricuspid_valve') {
+    const opt = ECHO_TRICUSPID_OPTIONS.find((x) => x.value === v);
+    return opt?.labelDe ?? v;
+  }
+  if (id === 'ascending_aorta') {
+    const opt = ECHO_AORTA_OPTIONS.find((x) => x.value === v);
+    return opt?.labelDe ?? v;
+  }
+  return v;
+}
+
+/** Best-effort parse of persisted `shkFollowUp.echoScreening`. */
 export function parseEchoScreeningStored(raw: unknown): EchoScreeningPayload | null {
-  const parsed = parseEchoScreeningFromBody({ echoScreening: raw });
+  if (!raw || typeof raw !== 'object') return null;
+  const o = raw as Record<string, unknown>;
+  if (!o.main || typeof o.main !== 'object') return null;
+  const normalized = {
+    ...o,
+    main: normalizeStoredMain(o.main as Record<string, unknown>),
+  };
+  const parsed = parseEchoScreeningFromBody({ echoScreening: normalized });
   return parsed.ok ? parsed.value : null;
 }
 
@@ -168,12 +294,14 @@ export function echoScreeningLinesForPdf(payload: EchoScreeningPayload): string[
   const lines: string[] = ['SHK Echo-Screening (Nachgespräch):'];
   for (const row of ECHO_MAIN_ROWS) {
     const v = payload.main[row.id];
-    const side = v === 'unauffaellig' ? `unauffällig — ${row.unauffaelligDe}` : `auffällig — ${row.auffaelligDe}`;
-    lines.push(`  • ${row.categoryDe}: ${side}`);
+    lines.push(`  • ${row.categoryDe}: ${formatMainValueForPdf(row.id, v)}`);
   }
   lines.push('  Optional (Kurzcheck):');
   for (const item of ECHO_OPTIONAL_ITEMS) {
     lines.push(`    - ${item.labelDe}: ${payload.optional[item.id] ? 'ja' : 'nein'}`);
+  }
+  if (payload.comment?.trim()) {
+    lines.push(`  Freitext/Kommentar: ${payload.comment.trim()}`);
   }
   const overallLabel = ECHO_OVERALL.find((x) => x.id === payload.overall)?.labelDe ?? payload.overall;
   lines.push(`  Gesamtbeurteilung: ${overallLabel}`);

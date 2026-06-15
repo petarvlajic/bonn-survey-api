@@ -41,6 +41,7 @@ export async function submitSurveyResponseFromBody(
     intervieweeName,
     intervieweeEmail,
     intervieweePhone,
+    intervieweeAddress,
     submittedAt,
     boundedPatientSubmit,
   } = body;
@@ -237,6 +238,7 @@ export async function submitSurveyResponseFromBody(
     intervieweeName: name || (intervieweeName as string | undefined),
     intervieweeEmail: email || (intervieweeEmail as string | undefined),
     intervieweePhone: intervieweePhone as string | undefined,
+    intervieweeAddress: intervieweeAddress as string | undefined,
   });
 
   try {

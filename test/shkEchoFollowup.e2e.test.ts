@@ -13,6 +13,7 @@ import { PDFDocument } from 'pdf-lib';
 const emailMocks = vi.hoisted(() => ({
   sendConsentEmailWithPdf: vi.fn(async () => undefined),
   sendSurveyCompletionEmail: vi.fn(async () => undefined),
+  sendPathologicalFindingReportEmail: vi.fn(async () => undefined),
 }));
 
 vi.mock('../src/middleware/auth', () => ({
@@ -30,6 +31,7 @@ vi.mock('../src/middleware/auth', () => ({
 vi.mock('../src/utils/email', () => ({
   sendConsentEmailWithPdf: emailMocks.sendConsentEmailWithPdf,
   sendSurveyCompletionEmail: emailMocks.sendSurveyCompletionEmail,
+  sendPathologicalFindingReportEmail: emailMocks.sendPathologicalFindingReportEmail,
 }));
 
 import responsesRouter from '../src/routes/responses';
@@ -62,6 +64,7 @@ describe('SHK echo follow-up (HTTP e2e)', () => {
     await ResponseModel.deleteMany({});
     emailMocks.sendConsentEmailWithPdf.mockClear();
     emailMocks.sendSurveyCompletionEmail.mockClear();
+    emailMocks.sendPathologicalFindingReportEmail.mockClear();
     delete process.env.SEND_SURVEY_COMPLETION_EMAIL;
   });
 
@@ -245,6 +248,80 @@ describe('SHK echo follow-up (HTTP e2e)', () => {
     const getRes = await request(app).get(`/api/responses/${rid}`).set('x-user-id', owner);
     expect(getRes.status).toBe(200);
     expect(getRes.body.response.shkFollowUp?.echoScreening?.overall).toBe('needs_followup');
+  });
+
+  it('sends pathological finding report email when checkbox is set on followup/complete', async () => {
+    if (!mongoReady) {
+      expect(true).toBe(true);
+      return;
+    }
+    const owner = new mongoose.Types.ObjectId().toString();
+    const createRes = await request(app)
+      .post('/api/responses')
+      .set('x-user-id', owner)
+      .send({
+        answers: [{ questionId: 'q1', type: 'TEXT', value: 'x' }],
+        draft: false,
+        status: 'completed',
+        boundedPatientSubmit: true,
+        pid: 'HZB-PATHO-01',
+        consentPdfBase64: 'data:application/pdf;base64,QUJDCg==',
+        intervieweeName: 'Patho Echo Patient',
+        intervieweeEmail: 'patho.echo@example.com',
+        signature: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+      });
+    expect(createRes.status).toBe(201);
+    const rid = createRes.body.response._id as string;
+    await request(app).post(`/api/responses/${rid}/lock`).set('x-user-id', owner);
+
+    const done = await request(app)
+      .post(`/api/responses/${rid}/followup/complete`)
+      .set('x-user-id', owner)
+      .send({
+        echoScreening: validEchoScreeningFixture(),
+        pathologicalFindingReport: true,
+      });
+
+    expect(done.status).toBe(200);
+    expect(done.body.response.pathologicalFindingReport).toBe(true);
+    expect(emailMocks.sendPathologicalFindingReportEmail).toHaveBeenCalledTimes(1);
+    const [pdfBuffer, meta] = emailMocks.sendPathologicalFindingReportEmail.mock.calls[0];
+    expect(Buffer.isBuffer(pdfBuffer)).toBe(true);
+    expect((pdfBuffer as Buffer).length).toBeGreaterThan(500);
+    expect(meta).toEqual({
+      pid: 'HZB-PATHO-01',
+      intervieweeName: 'Patho Echo Patient',
+    });
+  });
+
+  it('does not send pathological finding email when checkbox is omitted', async () => {
+    if (!mongoReady) {
+      expect(true).toBe(true);
+      return;
+    }
+    const owner = new mongoose.Types.ObjectId().toString();
+    const createRes = await request(app)
+      .post('/api/responses')
+      .set('x-user-id', owner)
+      .send({
+        answers: [{ questionId: 'q1', type: 'TEXT', value: 'x' }],
+        draft: false,
+        status: 'completed',
+        boundedPatientSubmit: true,
+        consentPdfBase64: 'data:application/pdf;base64,QUJDCg==',
+        intervieweeName: 'No Patho',
+        intervieweeEmail: 'no.patho@example.com',
+        signature: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+      });
+    const rid = createRes.body.response._id as string;
+    await request(app).post(`/api/responses/${rid}/lock`).set('x-user-id', owner);
+    const done = await request(app)
+      .post(`/api/responses/${rid}/followup/complete`)
+      .set('x-user-id', owner)
+      .send({ echoScreening: validEchoScreeningFixture() });
+    expect(done.status).toBe(200);
+    expect(done.body.response.pathologicalFindingReport).toBeFalsy();
+    expect(emailMocks.sendPathologicalFindingReportEmail).not.toHaveBeenCalled();
   });
 
   it('sends deferred consent email after successful follow-up', async () => {

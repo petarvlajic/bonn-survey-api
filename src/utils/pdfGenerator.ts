@@ -122,13 +122,14 @@ export const generateResponsePDF = async (
       doc.moveDown(1);
 
       // —— Interviewee ——
-      if (response.intervieweeName || response.intervieweeEmail || response.intervieweePhone) {
+      if (response.intervieweeName || response.intervieweeEmail || response.intervieweePhone || response.intervieweeAddress) {
         doc.fontSize(13).fillColor('#333333').text('Interviewee', { underline: true });
         doc.moveDown(0.4);
         doc.fontSize(11).fillColor('#000000');
         if (response.intervieweeName) doc.text(`Name: ${response.intervieweeName}`);
         if (response.intervieweeEmail) doc.text(`Email: ${response.intervieweeEmail}`);
         if (response.intervieweePhone) doc.text(`Phone: ${response.intervieweePhone}`);
+        if (response.intervieweeAddress) doc.text(`Address: ${response.intervieweeAddress}`);
         doc.moveDown(1);
       }
 
@@ -144,6 +145,7 @@ export const generateResponsePDF = async (
       if (response.birthDate) doc.text(`Geburtsdatum: ${response.birthDate}`);
       if (response.intervieweeEmail) doc.text(`E-Mail: ${response.intervieweeEmail}`);
       if (response.intervieweePhone) doc.text(`Telefon: ${response.intervieweePhone}`);
+      if (response.intervieweeAddress) doc.text(`Adresse: ${response.intervieweeAddress}`);
       doc.moveDown(1.2);
 
       // —— Answers ——

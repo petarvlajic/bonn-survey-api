@@ -40,6 +40,7 @@ const TRACKED_UPDATE_FIELDS = [
   'intervieweeName',
   'intervieweeEmail',
   'intervieweePhone',
+  'intervieweeAddress',
   'pid',
   'birthDate',
   'gender',
@@ -416,6 +417,7 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
       intervieweeName,
       intervieweeEmail,
       intervieweePhone,
+      intervieweeAddress,
       submittedAt, // Map to completedAt if status is completed
       boundedPatientSubmit,
     } = req.body;
@@ -584,6 +586,7 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
       intervieweeName,
       intervieweeEmail,
       intervieweePhone,
+      intervieweeAddress,
     });
 
     try {
@@ -760,6 +763,7 @@ router.put('/:id', authenticate, async (req: Request, res: Response) => {
       intervieweeName,
       intervieweeEmail,
       intervieweePhone,
+      intervieweeAddress,
       pid,
       birthDate,
       gender,
@@ -857,6 +861,7 @@ router.put('/:id', authenticate, async (req: Request, res: Response) => {
     if (intervieweeName !== undefined) response.intervieweeName = intervieweeName;
     if (intervieweeEmail !== undefined) response.intervieweeEmail = intervieweeEmail;
     if (intervieweePhone !== undefined) response.intervieweePhone = intervieweePhone;
+    if (intervieweeAddress !== undefined) response.intervieweeAddress = intervieweeAddress;
     if (pid !== undefined) response.pid = pid;
     if (birthDate !== undefined) response.birthDate = birthDate;
     if (gender !== undefined) {
