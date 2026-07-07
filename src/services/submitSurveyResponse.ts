@@ -43,7 +43,7 @@ export async function submitSurveyResponseFromBody(
     intervieweePhone,
     intervieweeAddress,
     submittedAt,
-    boundedPatientSubmit,
+    patientBoundedSubmit,
   } = body;
 
   const transformedAnswers = parseAnswers(body);
@@ -212,7 +212,7 @@ export async function submitSurveyResponseFromBody(
   const effectivePid = (pid as string) || generatePid();
   const useBoundedPatientFlow =
     options.forceBoundedPatient ||
-    (!finalDraft && (boundedPatientSubmit === true || boundedPatientSubmit === 'true'));
+    (!finalDraft && (patientBoundedSubmit === true || patientBoundedSubmit === 'true'));
 
   const consentPdfBase64Deferred =
     useBoundedPatientFlow && consentPdfBase64 ? String(consentPdfBase64) : undefined;

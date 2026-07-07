@@ -290,6 +290,20 @@ router.get('/', authenticate, async (req: Request, res: Response) => {
       ResponseModel.countDocuments(filter),
     ]);
 
+    console.log(
+      '[GET /responses] list:',
+      responses.map((r) => ({
+        id: r._id?.toString(),
+        pid: r.pid,
+        draft: r.draft,
+        status: r.draft ? 'draft' : 'completed',
+        workflowStatus: r.workflowStatus,
+        patientBoundedSubmit: r.patientBoundedSubmit,
+        shkFollowUpCompletedAt: r.shkFollowUp?.completedAt || null,
+        createdAt: r.createdAt,
+      }))
+    );
+
     res.json({
       responses,
       total,
@@ -419,7 +433,7 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
       intervieweePhone,
       intervieweeAddress,
       submittedAt, // Map to completedAt if status is completed
-      boundedPatientSubmit,
+      patientBoundedSubmit,
     } = req.body;
 
     // Use answers or answer (singular)
@@ -562,7 +576,7 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
 
     const useBoundedPatientFlow =
       !finalDraft &&
-      (boundedPatientSubmit === true || boundedPatientSubmit === 'true');
+      (patientBoundedSubmit === true || patientBoundedSubmit === 'true');
     const consentPdfBase64Deferred =
       useBoundedPatientFlow && consentPdfBase64 ? String(consentPdfBase64) : undefined;
     const initialWorkflow = finalDraft
@@ -570,6 +584,15 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
       : useBoundedPatientFlow
         ? 'pending_shk_followup'
         : 'patient_completed';
+
+    console.log('[POST /responses] workflow decision:', {
+      rawPatientBoundedSubmit: patientBoundedSubmit,
+      rawDraft: draft,
+      rawStatus: status,
+      finalDraft,
+      useBoundedPatientFlow,
+      initialWorkflow,
+    });
 
     const response = new ResponseModel({
       userId: req.user!._id,
@@ -591,6 +614,12 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
 
     try {
       await response.save();
+      console.log('[POST /responses] saved:', {
+        id: response._id?.toString(),
+        draft: response.draft,
+        workflowStatus: response.workflowStatus,
+        patientBoundedSubmit: response.patientBoundedSubmit,
+      });
       await response.populate('userId', 'email profile.firstName profile.lastName profile.examinerSignatureBase64');
 
       // Optional survey-response email (disabled by default).
