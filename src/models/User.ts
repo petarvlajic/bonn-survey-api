@@ -5,6 +5,8 @@ export interface IUser extends Document {
   password: string;
   /** Dashboard: `admin` sees user list (`/api/auth/admin/users`). Default `user` for SHK staff. */
   role: 'user' | 'admin';
+  /** SHK staff vs patient/personal account — set at registration, drives authorization (see staffAccess.ts). */
+  accountType?: 'staff' | 'patient';
   profile: {
     firstName: string;
     lastName: string;
@@ -42,6 +44,10 @@ const UserSchema = new Schema<IUser>(
       type: String,
       enum: ['user', 'admin'],
       default: 'user',
+    },
+    accountType: {
+      type: String,
+      enum: ['staff', 'patient'],
     },
     profile: {
       firstName: {

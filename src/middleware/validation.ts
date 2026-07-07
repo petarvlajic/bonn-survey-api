@@ -9,13 +9,9 @@ const EMAIL_FORMAT = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export const normalizeAuthEmail = (email: string): string =>
   String(email).trim().toLowerCase();
 
-/** Any plausible email (patient / personal accounts). */
+/** Any plausible email (patient and staff accounts alike). */
 export const isValidEmailFormat = (email: string): boolean =>
   typeof email === 'string' && EMAIL_FORMAT.test(normalizeAuthEmail(email));
-
-/** UK Bonn staff mailbox (SHK / interviewer registration). */
-export const isUkbonnStaffEmail = (email: string): boolean =>
-  isValidEmailFormat(email) && email.trim().toLowerCase().endsWith('@ukbonn.de');
 
 export function validatePasswordStrength(password: string): { valid: boolean; error?: string } {
   if (password.length < 8) {
@@ -41,7 +37,7 @@ export const validateRegister = (
   res: Response,
   next: NextFunction
 ): void => {
-  const { email, password, firstName, lastName, registrationAccountType } = req.body;
+  const { email, password, firstName, lastName } = req.body;
 
   if (!email || !password || !firstName || !lastName) {
     console.log('[Auth] validateRegister – 400 Missing required fields');
@@ -53,22 +49,10 @@ export const validateRegister = (
     return;
   }
 
-  const accountType: 'patient' | 'staff' =
-    registrationAccountType === 'patient' ? 'patient' : 'staff';
-
-  if (accountType === 'patient') {
-    if (!isValidEmailFormat(email)) {
-      console.log('[Auth] validateRegister – 400 Invalid email (patient):', email);
-      res.status(400).json({
-        error: 'Invalid email address',
-        code: 'INVALID_EMAIL',
-      });
-      return;
-    }
-  } else if (!isUkbonnStaffEmail(email)) {
-    console.log('[Auth] validateRegister – 400 Invalid email (staff, not @ukbonn.de):', email);
+  if (!isValidEmailFormat(email)) {
+    console.log('[Auth] validateRegister – 400 Invalid email:', email);
     res.status(400).json({
-      error: 'Staff accounts must use an @ukbonn.de email address',
+      error: 'Invalid email address',
       code: 'INVALID_EMAIL',
     });
     return;

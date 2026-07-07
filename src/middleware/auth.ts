@@ -11,6 +11,7 @@ declare global {
         _id: string;
         email: string;
         role: 'user' | 'admin';
+        accountType?: 'staff' | 'patient';
         profile: {
           firstName: string;
           lastName: string;
@@ -39,8 +40,8 @@ export const authenticate = async (
     const token = authHeader.substring(7);
     const decoded = verifyToken(token);
     
-    const user = await User.findById(decoded.userId).select('email profile role');
-    
+    const user = await User.findById(decoded.userId).select('email profile role accountType');
+
     if (!user) {
       res.status(401).json({ error: 'User not found', code: 'USER_NOT_FOUND' });
       return;
@@ -51,6 +52,7 @@ export const authenticate = async (
       _id: user._id.toString(),
       email: user.email,
       role: roleRaw === 'admin' ? 'admin' : 'user',
+      accountType: user.accountType,
       profile: user.profile,
     };
 

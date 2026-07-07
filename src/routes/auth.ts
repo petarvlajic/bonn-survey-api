@@ -51,7 +51,7 @@ function parseAdminEmailSet(): Set<string> {
  *               email:
  *                 type: string
  *                 format: email
- *                 description: Any valid email when registrationAccountType is patient; staff must use @ukbonn.de (default type is staff)
+ *                 description: Any valid email works for both patient and staff (default type is staff)
  *               registrationAccountType:
  *                 type: string
  *                 enum: [patient, staff]
@@ -100,7 +100,10 @@ router.post('/register', validateRegister, async (req: Request, res: Response) =
       avatar,
       position,
       examinerSignatureBase64,
+      registrationAccountType,
     } = req.body;
+    const accountType: 'staff' | 'patient' =
+      registrationAccountType === 'patient' ? 'patient' : 'staff';
     console.log('[Auth] POST /register – email:', email, 'firstName:', firstName);
 
     const emailNorm = normalizeAuthEmail(email);
@@ -145,6 +148,7 @@ router.post('/register', validateRegister, async (req: Request, res: Response) =
       email: emailNorm,
       password: hashedPassword,
       profile,
+      accountType,
     });
 
     await user.save();

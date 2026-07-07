@@ -2,7 +2,7 @@ import express, { Request, Response } from 'express';
 import { Response as ResponseModel } from '../models/Response';
 import { DeletedResponseArchive } from '../models/DeletedResponseArchive';
 import { User } from '../models/User';
-import { isStaffEmail } from '../utils/staffAccess';
+import { isStaffAccount } from '../utils/staffAccess';
 import { authenticate } from '../middleware/auth';
 import { generateResponsePDF } from '../utils/pdfGenerator';
 import {
@@ -767,7 +767,7 @@ router.put('/:id', authenticate, async (req: Request, res: Response) => {
     const currentUserId = req.user!._id;
     const isOwner = response.userId.toString() === currentUserId;
     const hasShkLock = !!response.lockedBy && response.lockedBy.toString() === currentUserId;
-    const staff = isStaffEmail(req.user!.email);
+    const staff = isStaffAccount(req.user);
     const staffMayEditPatientCase =
       staff &&
       response.patientBoundedSubmit &&
@@ -1004,7 +1004,7 @@ router.delete('/:id', authenticate, async (req: Request, res: Response) => {
     const isOwner = response.userId.toString() === String(currentUserId);
     const hasShkLock =
       !!response.lockedBy && response.lockedBy.toString() === String(currentUserId);
-    const staff = isStaffEmail(req.user!.email);
+    const staff = isStaffAccount(req.user);
     if (!isOwner && !staff) {
       res.status(403).json({
         error: 'Access denied',

@@ -97,7 +97,7 @@ describe('auth routes integration', () => {
     expect(res.body.code).toBe('USER_EXISTS');
   });
 
-  it('rejects staff register with INVALID_EMAIL when not @ukbonn.de', async () => {
+  it('allows staff register with a non-@ukbonn.de email and persists accountType staff', async () => {
     if (!mongoReady) {
       expect(true).toBe(true);
       return;
@@ -106,6 +106,24 @@ describe('auth routes integration', () => {
       .post('/api/auth/register')
       .send({
         email: 'x@gmail.com',
+        password: STRONG_PASSWORD,
+        firstName: 'A',
+        lastName: 'B',
+      });
+    expect(res.status).toBe(201);
+    expect(res.body.user.email).toBe('x@gmail.com');
+    expect(res.body.user.accountType).toBe('staff');
+  });
+
+  it('rejects register with INVALID_EMAIL for a malformed email', async () => {
+    if (!mongoReady) {
+      expect(true).toBe(true);
+      return;
+    }
+    const res = await request(app)
+      .post('/api/auth/register')
+      .send({
+        email: 'not-an-email',
         password: STRONG_PASSWORD,
         firstName: 'A',
         lastName: 'B',
@@ -130,6 +148,7 @@ describe('auth routes integration', () => {
       });
     expect(res.status).toBe(201);
     expect(res.body.user.email).toBe('participant.user@gmail.com');
+    expect(res.body.user.accountType).toBe('patient');
     expect(res.body.token).toBeTruthy();
   });
 
