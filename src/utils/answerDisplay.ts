@@ -50,8 +50,16 @@ export function formatStoredAnswerValue(input: {
   const questionId = input.questionId || '';
 
   if (type === 'IMAGE_UPLOAD' || type === 'FILE_UPLOAD') {
-    if (input.imageUri) return String(input.imageUri);
-    if (input.fileUri) return String(input.fileUri);
+    if (input.imageUri) {
+      return input.imageUri.startsWith('data:')
+        ? '(Foto / Anhang gespeichert)'
+        : String(input.imageUri);
+    }
+    if (input.fileUri) {
+      return input.fileUri.startsWith('data:')
+        ? '(Foto / Anhang gespeichert)'
+        : String(input.fileUri);
+    }
     if (typeof raw === 'string' && raw.startsWith('data:')) return '(Foto / Anhang gespeichert)';
     if (raw != null && String(raw).trim()) return String(raw);
     return '(Foto / Anhang gespeichert)';
