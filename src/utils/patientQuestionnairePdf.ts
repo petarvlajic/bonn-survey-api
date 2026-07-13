@@ -6,6 +6,9 @@ import { QUESTION_LABELS } from './questionLabels';
 export const PATIENT_QUESTIONNAIRE_ORDER: string[] = [
   'name',
   'email',
+  'intervieweePhone',
+  'intervieweeAddress',
+  'preferredContactMethod',
   'birthDate',
   'date',
   'hasChestComplaints',
