@@ -37,6 +37,8 @@ export const PATIENT_QUESTIONNAIRE_ORDER: string[] = [
   'heartDiseases',
   'riskFactors',
   'previousExams',
+  'previousExamsFreeText',
+  'medicationFreeText',
   'echoFreeText',
 ];
 
