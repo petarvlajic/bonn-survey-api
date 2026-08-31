@@ -161,8 +161,26 @@ export const generateResponsePDF = async (
           doc.text(`${label} — ${typeLabel}`, { continued: false });
           doc.fontSize(10).fillColor('#444444');
           doc.text(valueText || '—', { indent: 12 });
-          if (answer.imageUri) doc.text(`Attachment: ${answer.imageUri}`, { indent: 12 });
-          if (answer.fileUri) doc.text(`File: ${answer.fileUri}`, { indent: 12 });
+
+          // Handle image embedding for IMAGE_UPLOAD
+          if (answer.imageUri && answer.type === 'IMAGE_UPLOAD') {
+            try {
+              if (typeof answer.imageUri === 'string' && answer.imageUri.startsWith('data:image/')) {
+                const base64Data = answer.imageUri.split(',')[1];
+                if (base64Data) {
+                  const imageBuffer = Buffer.from(base64Data, 'base64');
+                  doc.y += 10;
+                  doc.image(imageBuffer, 62, doc.y, { fit: [200, 200], align: 'center' });
+                  doc.moveDown(2.5);
+                }
+              }
+            } catch (error) {
+              console.warn('[PDF] Image embedding failed:', (error as Error).message);
+              doc.fontSize(9).fillColor('#999999').text(`[Image could not be embedded]`, { indent: 12 });
+            }
+          }
+
+          if (answer.fileUri && answer.type !== 'IMAGE_UPLOAD') doc.text(`File: ${answer.fileUri}`, { indent: 12 });
           doc.moveDown(0.6);
         });
         doc.moveDown(0.3);
