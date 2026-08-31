@@ -69,7 +69,14 @@ export function buildResponsesFilterFromQuery(
   const workflowBucket = query.workflowBucket;
   if (workflowBucket && typeof workflowBucket === 'string') {
     const bucketFilter = buildWorkflowBucketFilter(workflowBucket);
-    if (bucketFilter) Object.assign(filter, bucketFilter);
+    if (bucketFilter) {
+      if (filter.$or) {
+        filter.$and = [{ $or: filter.$or }, bucketFilter];
+        delete filter.$or;
+      } else {
+        Object.assign(filter, bucketFilter);
+      }
+    }
   }
 
   const pid = query.pid;
