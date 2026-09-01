@@ -2,6 +2,7 @@ import PDFDocument from 'pdfkit';
 import { Response as ResponseModel } from '../models/Response';
 import * as fs from 'fs';
 import * as path from 'path';
+import sharp from 'sharp';
 import { echoScreeningLinesForPdf, parseEchoScreeningStored } from './shkEchoScreening';
 import { signatureToImageBuffer } from './signatureImage';
 import { formatStoredAnswerValue } from './answerDisplay';
@@ -39,6 +40,21 @@ function formatAnswerValue(answer: any): string {
   });
 }
 
+async function imageDataUrlToBuffer(dataUrl: string): Promise<Buffer | null> {
+  try {
+    const base64Data = dataUrl.split(',')[1];
+    if (!base64Data) return null;
+    const buffer = Buffer.from(base64Data, 'base64');
+    if (buffer.length === 0) return null;
+    return await sharp(buffer)
+      .png({ compressionLevel: 9, adaptiveFiltering: true })
+      .toBuffer();
+  } catch (e) {
+    console.warn('[PDF] Image processing failed:', (e as Error).message);
+    return null;
+  }
+}
+
 /**
  * Generate PDF buffer from response
  */
@@ -62,6 +78,22 @@ export const generateResponsePDF = async (
       examinerSignatureBuffer = await signatureToImageBuffer(examinerRaw);
     } catch (e) {
       console.warn('[PDF] Examiner signature conversion failed:', (e as Error).message);
+    }
+  }
+
+  const processedAnswerImages = new Map<number, Buffer | null>();
+  if (response.answers && response.answers.length > 0) {
+    for (let i = 0; i < response.answers.length; i++) {
+      const answer = response.answers[i];
+      if (answer.imageUri && answer.type === 'IMAGE_UPLOAD' && typeof answer.imageUri === 'string' && answer.imageUri.startsWith('data:image/')) {
+        try {
+          const imageBuffer = await imageDataUrlToBuffer(answer.imageUri);
+          processedAnswerImages.set(i, imageBuffer);
+        } catch (e) {
+          console.warn('[PDF] Image processing failed for answer', i, ':', (e as Error).message);
+          processedAnswerImages.set(i, null);
+        }
+      }
     }
   }
 
@@ -153,8 +185,9 @@ export const generateResponsePDF = async (
         doc.fontSize(13).fillColor('#333333').text('Answers', { underline: true });
         doc.moveDown(0.6);
 
-        response.answers.forEach((answer: any, index: number) => {
-          const label = getQuestionLabel(answer.questionId, index + 1);
+        for (let i = 0; i < response.answers.length; i++) {
+          const answer = response.answers[i];
+          const label = getQuestionLabel(answer.questionId, i + 1);
           const typeLabel = formatQuestionType(answer.type);
           const valueText = formatAnswerValue(answer);
           doc.fontSize(11).fillColor('#000000');
@@ -165,14 +198,13 @@ export const generateResponsePDF = async (
           // Handle image embedding for IMAGE_UPLOAD
           if (answer.imageUri && answer.type === 'IMAGE_UPLOAD') {
             try {
-              if (typeof answer.imageUri === 'string' && answer.imageUri.startsWith('data:image/')) {
-                const base64Data = answer.imageUri.split(',')[1];
-                if (base64Data) {
-                  const imageBuffer = Buffer.from(base64Data, 'base64');
-                  doc.y += 10;
-                  doc.image(imageBuffer, 62, doc.y, { fit: [200, 200], align: 'center' });
-                  doc.moveDown(2.5);
-                }
+              const imageBuffer = processedAnswerImages.get(i);
+              if (imageBuffer) {
+                doc.y += 10;
+                doc.image(imageBuffer, 62, doc.y, { fit: [200, 200], align: 'center' });
+                doc.moveDown(2.5);
+              } else if (imageBuffer === undefined) {
+                doc.fontSize(9).fillColor('#999999').text(`[Image could not be embedded]`, { indent: 12 });
               }
             } catch (error) {
               console.warn('[PDF] Image embedding failed:', (error as Error).message);
@@ -182,7 +214,7 @@ export const generateResponsePDF = async (
 
           if (answer.fileUri && answer.type !== 'IMAGE_UPLOAD') doc.text(`File: ${answer.fileUri}`, { indent: 12 });
           doc.moveDown(0.6);
-        });
+        }
         doc.moveDown(0.3);
       }
 
