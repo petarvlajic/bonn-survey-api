@@ -200,9 +200,11 @@ export const generateResponsePDF = async (
             try {
               const imageBuffer = processedAnswerImages.get(i);
               if (imageBuffer) {
-                doc.y += 10;
-                doc.image(imageBuffer, 62, doc.y, { fit: [200, 200], align: 'center' });
-                doc.moveDown(2.5);
+                doc.moveDown(0.5);
+                const imageY = doc.y;
+                doc.image(imageBuffer, 62, imageY, { fit: [200, 200], align: 'center' });
+                doc.y = imageY + 210;
+                doc.moveDown(0.8);
               } else if (imageBuffer === undefined) {
                 doc.fontSize(9).fillColor('#999999').text(`[Image could not be embedded]`, { indent: 12 });
               }
