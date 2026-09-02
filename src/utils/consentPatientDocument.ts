@@ -202,16 +202,7 @@ export async function buildConsentPdfBuffer(
     doc.moveDown(0.5);
     doc.text(`Datum: ${dateShown}`);
     doc.moveDown(0.8);
-
-    // Split raw text by line breaks and render each line separately to preserve formatting
-    const lines = cachedRawText.split('\n').map(line => line.trim()).filter(line => line);
-    doc.fontSize(10);
-    lines.forEach((line, idx) => {
-      doc.text(line, { width: 504, align: 'left' });
-      if (idx < lines.length - 1) {
-        doc.moveDown(0.15);
-      }
-    });
+    doc.fontSize(10).text(cachedRawText, { width: 504, align: 'left' });
 
     doc.end();
   });
