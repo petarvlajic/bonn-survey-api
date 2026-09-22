@@ -41,6 +41,9 @@ export interface IResponse extends Document {
   lockedBy?: mongoose.Types.ObjectId;
   lockedAt?: Date;
   closedAt?: Date;
+  deletedAt?: Date;
+  deletedBy?: mongoose.Types.ObjectId;
+  deletionReason?: string;
   changeLog: Array<{
     changedBy: mongoose.Types.ObjectId;
     changedAt: Date;
@@ -173,6 +176,18 @@ const ResponseSchema = new Schema<IResponse>(
     closedAt: {
       type: Date,
     },
+    deletedAt: {
+      type: Date,
+      default: null,
+    },
+    deletedBy: {
+      type: Schema.Types.ObjectId,
+      ref: 'User',
+    },
+    deletionReason: {
+      type: String,
+      trim: true,
+    },
     changeLog: {
       type: [
         new Schema(
@@ -216,6 +231,7 @@ ResponseSchema.index({ intervieweeEmail: 1 });
 ResponseSchema.index({ pid: 1 });
 ResponseSchema.index({ workflowStatus: 1 });
 ResponseSchema.index({ lockedBy: 1 });
+ResponseSchema.index({ deletedAt: 1 });
 
 export const Response = mongoose.model<IResponse>('Response', ResponseSchema);
 

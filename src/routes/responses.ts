@@ -1038,19 +1038,83 @@ router.delete('/:id', authenticate, async (req: Request, res: Response) => {
       snapshot: response.toObject(),
     });
 
-    console.log('[API] Response deleted (archived)', {
+    console.log('[API] Response deleted (soft delete)', {
       responseId: response._id.toString(),
       pid: response.pid,
       deletedBy: req.user!.email,
       reason: reasonTrimmed.slice(0, 120),
     });
 
-    await ResponseModel.findByIdAndDelete(req.params.id);
+    await ResponseModel.findByIdAndUpdate(req.params.id, {
+      deletedAt: new Date(),
+      deletedBy: currentUserId,
+      deletionReason: reasonTrimmed,
+    });
 
     res.json({
       message: 'Response deleted successfully',
       code: 'DELETE_SUCCESS',
       archivedPid: response.pid ?? null,
+    });
+  } catch (error) {
+    throw error;
+  }
+});
+
+// Restore soft-deleted response
+router.post('/:id/restore', authenticate, async (req: Request, res: Response) => {
+  try {
+    if (!req.params.id || req.params.id.length !== 24) {
+      res.status(400).json({
+        error: 'Invalid response ID',
+        code: 'INVALID_ID',
+      });
+      return;
+    }
+
+    const response = await ResponseModel.findById(req.params.id);
+
+    if (!response) {
+      res.status(404).json({
+        error: 'Response not found',
+        code: 'RESPONSE_NOT_FOUND',
+      });
+      return;
+    }
+
+    if (!response.deletedAt) {
+      res.status(400).json({
+        error: 'Response is not deleted',
+        code: 'NOT_DELETED',
+        message: 'Cannot restore a response that has not been deleted.',
+      });
+      return;
+    }
+
+    const staff = isStaffAccount(req.user);
+    if (!staff) {
+      res.status(403).json({
+        error: 'Access denied',
+        code: 'FORBIDDEN',
+        message: 'Only UKB staff can restore deleted responses.',
+      });
+      return;
+    }
+
+    await ResponseModel.findByIdAndUpdate(req.params.id, {
+      deletedAt: null,
+      deletedBy: null,
+      deletionReason: null,
+    });
+
+    console.log('[API] Response restored', {
+      responseId: response._id.toString(),
+      restoredBy: req.user!.email,
+    });
+
+    res.json({
+      message: 'Response restored successfully',
+      code: 'RESTORE_SUCCESS',
     });
   } catch (error) {
     throw error;

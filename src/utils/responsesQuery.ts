@@ -55,6 +55,8 @@ export function buildResponsesFilterFromQuery(
 ): { filter: Record<string, unknown>; answerFiltersError?: string } {
   const filter: Record<string, unknown> = {};
 
+  filter.deletedAt = null;
+
   const userId = query.userId;
   if (userId && typeof userId === 'string') filter.userId = userId;
 
