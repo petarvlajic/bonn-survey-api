@@ -41,6 +41,7 @@ const TRACKED_UPDATE_FIELDS = [
   'intervieweeEmail',
   'intervieweePhone',
   'intervieweeAddress',
+  'intervieweePostalCode',
   'pid',
   'birthDate',
   'gender',
@@ -432,6 +433,7 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
       intervieweeEmail,
       intervieweePhone,
       intervieweeAddress,
+      intervieweePostalCode,
       submittedAt, // Map to completedAt if status is completed
       patientBoundedSubmit,
     } = req.body;
@@ -507,6 +509,20 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
           message: `The email address "${intervieweeEmail}" is not valid.`,
           hint: 'Please provide a valid email address (e.g., user@example.com)',
           field: 'intervieweeEmail',
+        });
+        return;
+      }
+    }
+
+    // Validate postal code format if provided
+    if (intervieweePostalCode !== undefined && intervieweePostalCode !== null && intervieweePostalCode !== '') {
+      if (!/^\d{5}$/.test(String(intervieweePostalCode).trim())) {
+        res.status(400).json({
+          error: 'Invalid postal code format',
+          code: 'INVALID_POSTAL_CODE',
+          message: `The postal code "${intervieweePostalCode}" is not valid.`,
+          hint: 'Please provide a valid 5-digit German postal code (e.g., 53111)',
+          field: 'intervieweePostalCode',
         });
         return;
       }
@@ -610,6 +626,7 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
       intervieweeEmail,
       intervieweePhone,
       intervieweeAddress,
+      intervieweePostalCode,
     });
 
     try {
@@ -793,6 +810,7 @@ router.put('/:id', authenticate, async (req: Request, res: Response) => {
       intervieweeEmail,
       intervieweePhone,
       intervieweeAddress,
+      intervieweePostalCode,
       pid,
       birthDate,
       gender,
@@ -832,6 +850,20 @@ router.put('/:id', authenticate, async (req: Request, res: Response) => {
       }
     }
 
+    // Validate postal code format if provided
+    if (intervieweePostalCode !== undefined && intervieweePostalCode !== null && intervieweePostalCode !== '') {
+      if (!/^\d{5}$/.test(String(intervieweePostalCode).trim())) {
+        res.status(400).json({
+          error: 'Invalid postal code format',
+          code: 'INVALID_POSTAL_CODE',
+          message: `The postal code "${intervieweePostalCode}" is not valid.`,
+          hint: 'Please provide a valid 5-digit German postal code (e.g., 53111)',
+          field: 'intervieweePostalCode',
+        });
+        return;
+      }
+    }
+
     let parsedCompletedAt: Date | undefined;
     // Validate completedAt if provided
     if (completedAt !== undefined) {
@@ -866,6 +898,7 @@ router.put('/:id', authenticate, async (req: Request, res: Response) => {
       intervieweeName: response.intervieweeName,
       intervieweeEmail: response.intervieweeEmail,
       intervieweePhone: response.intervieweePhone,
+      intervieweePostalCode: response.intervieweePostalCode,
       pid: response.pid,
       birthDate: response.birthDate,
       gender: response.gender,
@@ -891,6 +924,7 @@ router.put('/:id', authenticate, async (req: Request, res: Response) => {
     if (intervieweeEmail !== undefined) response.intervieweeEmail = intervieweeEmail;
     if (intervieweePhone !== undefined) response.intervieweePhone = intervieweePhone;
     if (intervieweeAddress !== undefined) response.intervieweeAddress = intervieweeAddress;
+    if (intervieweePostalCode !== undefined) response.intervieweePostalCode = intervieweePostalCode;
     if (pid !== undefined) response.pid = pid;
     if (birthDate !== undefined) response.birthDate = birthDate;
     if (gender !== undefined) {
@@ -908,6 +942,7 @@ router.put('/:id', authenticate, async (req: Request, res: Response) => {
       intervieweeName: response.intervieweeName,
       intervieweeEmail: response.intervieweeEmail,
       intervieweePhone: response.intervieweePhone,
+      intervieweePostalCode: response.intervieweePostalCode,
       pid: response.pid,
       birthDate: response.birthDate,
       gender: response.gender,

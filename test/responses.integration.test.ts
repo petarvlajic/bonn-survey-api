@@ -368,6 +368,82 @@ describe('responses routes integration', () => {
     expect(createRes.body.code).toBe('INVALID_EMAIL');
   });
 
+  it('rejects create response with invalid postal code format', async () => {
+    if (!mongoReady) {
+      expect(true).toBe(true);
+      return;
+    }
+    const owner = new mongoose.Types.ObjectId().toString();
+    const createRes = await request(app)
+      .post('/api/responses')
+      .set('x-user-id', owner)
+      .send({
+        answers: [{ questionId: 'q1', type: 'TEXT', value: 'x' }],
+        draft: false,
+        status: 'completed',
+        intervieweeName: 'Postal User',
+        intervieweeEmail: 'postal.user@example.com',
+        intervieweePostalCode: '123',
+      });
+    expect(createRes.status).toBe(400);
+    expect(createRes.body.code).toBe('INVALID_POSTAL_CODE');
+  });
+
+  it('creates and updates a response with a valid postal code', async () => {
+    if (!mongoReady) {
+      expect(true).toBe(true);
+      return;
+    }
+    const owner = new mongoose.Types.ObjectId().toString();
+    const createRes = await request(app)
+      .post('/api/responses')
+      .set('x-user-id', owner)
+      .send({
+        answers: [{ questionId: 'q1', type: 'TEXT', value: 'x' }],
+        draft: false,
+        status: 'completed',
+        intervieweeName: 'Postal User',
+        intervieweeEmail: 'postal.user@example.com',
+        intervieweePostalCode: '53111',
+      });
+    expect(createRes.status).toBe(201);
+    expect(createRes.body.response.intervieweePostalCode).toBe('53111');
+
+    const updateRes = await request(app)
+      .put(`/api/responses/${createRes.body.response._id}`)
+      .set('x-user-id', owner)
+      .send({ intervieweePostalCode: '10115' });
+    expect(updateRes.status).toBe(200);
+    expect(updateRes.body.response.intervieweePostalCode).toBe('10115');
+  });
+
+  it('rejects update with invalid postal code format', async () => {
+    if (!mongoReady) {
+      expect(true).toBe(true);
+      return;
+    }
+    const owner = new mongoose.Types.ObjectId().toString();
+    const createRes = await request(app)
+      .post('/api/responses')
+      .set('x-user-id', owner)
+      .send({
+        answers: [{ questionId: 'q1', type: 'TEXT', value: 'x' }],
+        draft: false,
+        status: 'completed',
+        intervieweeName: 'Postal User',
+        intervieweeEmail: 'postal.user@example.com',
+        intervieweePostalCode: '53111',
+      });
+    expect(createRes.status).toBe(201);
+
+    const updateRes = await request(app)
+      .put(`/api/responses/${createRes.body.response._id}`)
+      .set('x-user-id', owner)
+      .send({ intervieweePostalCode: 'abcde' });
+    expect(updateRes.status).toBe(400);
+    expect(updateRes.body.code).toBe('INVALID_POSTAL_CODE');
+  });
+
   it('rejects create response with invalid submittedAt date', async () => {
     if (!mongoReady) {
       expect(true).toBe(true);

@@ -8,6 +8,7 @@ export const PATIENT_QUESTIONNAIRE_ORDER: string[] = [
   'email',
   'intervieweePhone',
   'intervieweeAddress',
+  'intervieweePostalCode',
   'preferredContactMethod',
   'birthDate',
   'date',

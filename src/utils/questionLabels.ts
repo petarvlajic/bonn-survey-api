@@ -39,6 +39,7 @@ export const QUESTION_LABELS: Record<string, string> = {
   echoFreeText: 'Freitext',
   intervieweePhone: 'Handy / Telefon',
   intervieweeAddress: 'Adresse',
+  intervieweePostalCode: 'Postleitzahl (PLZ)',
   preferredContactMethod: 'Wie möchten Sie bevorzugt kontaktiert werden?',
   signature: 'Signature',
 };

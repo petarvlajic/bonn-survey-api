@@ -22,6 +22,7 @@ export interface IResponse extends Document {
   intervieweeEmail?: string;
   intervieweePhone?: string;
   intervieweeAddress?: string;
+  intervieweePostalCode?: string;
   workflowStatus:
     | 'patient_in_progress'
     | 'patient_completed'
@@ -137,6 +138,18 @@ const ResponseSchema = new Schema<IResponse>(
     intervieweeAddress: {
       type: String,
       trim: true,
+    },
+    intervieweePostalCode: {
+      type: String,
+      trim: true,
+      validate: {
+        validator: function(v: string) {
+          // Allow empty/undefined (presence required at route layer, not schema layer)
+          if (!v || v === '') return true;
+          return /^\d{5}$/.test(v);
+        },
+        message: 'Please provide a valid 5-digit postal code',
+      },
     },
     workflowStatus: {
       type: String,

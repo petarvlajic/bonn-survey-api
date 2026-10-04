@@ -247,6 +247,10 @@ const swaggerDefinition: SwaggerDefinition = {
           intervieweePhone: {
             type: 'string',
           },
+          intervieweePostalCode: {
+            type: 'string',
+            description: '5-digit German postal code (PLZ)',
+          },
           createdAt: {
             type: 'string',
             format: 'date-time',

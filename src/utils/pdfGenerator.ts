@@ -162,6 +162,7 @@ export const generateResponsePDF = async (
         if (response.intervieweeEmail) doc.text(`Email: ${response.intervieweeEmail}`);
         if (response.intervieweePhone) doc.text(`Phone: ${response.intervieweePhone}`);
         if (response.intervieweeAddress) doc.text(`Address: ${response.intervieweeAddress}`);
+        if (response.intervieweePostalCode) doc.text(`Postal Code: ${response.intervieweePostalCode}`);
         doc.moveDown(1);
       }
 
@@ -178,6 +179,7 @@ export const generateResponsePDF = async (
       if (response.intervieweeEmail) doc.text(`E-Mail: ${response.intervieweeEmail}`);
       if (response.intervieweePhone) doc.text(`Telefon: ${response.intervieweePhone}`);
       if (response.intervieweeAddress) doc.text(`Adresse: ${response.intervieweeAddress}`);
+      if (response.intervieweePostalCode) doc.text(`PLZ: ${response.intervieweePostalCode}`);
       doc.moveDown(1.2);
 
       // —— Answers ——

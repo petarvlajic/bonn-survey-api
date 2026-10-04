@@ -42,6 +42,7 @@ export async function submitSurveyResponseFromBody(
     intervieweeEmail,
     intervieweePhone,
     intervieweeAddress,
+    intervieweePostalCode,
     submittedAt,
     patientBoundedSubmit,
   } = body;
@@ -105,6 +106,7 @@ export async function submitSurveyResponseFromBody(
 
   const name = typeof intervieweeName === 'string' ? intervieweeName.trim() : '';
   const email = typeof intervieweeEmail === 'string' ? intervieweeEmail.trim() : '';
+  const postalCode = typeof intervieweePostalCode === 'string' ? intervieweePostalCode.trim() : '';
   if (options.requireCompleted && (!name || !email)) {
     return {
       ok: false,
@@ -113,6 +115,19 @@ export async function submitSurveyResponseFromBody(
         error: 'Interviewee details required',
         code: 'MISSING_INTERVIEWEE',
         message: 'Name and email are required.',
+      },
+    };
+  }
+
+  if (options.requireCompleted && !postalCode) {
+    return {
+      ok: false,
+      status: 400,
+      payload: {
+        error: 'Postal code required',
+        code: 'MISSING_POSTAL_CODE',
+        message: 'Postal code is required.',
+        field: 'intervieweePostalCode',
       },
     };
   }
@@ -147,6 +162,18 @@ export async function submitSurveyResponseFromBody(
         },
       };
     }
+  }
+
+  if (postalCode && !/^\d{5}$/.test(postalCode)) {
+    return {
+      ok: false,
+      status: 400,
+      payload: {
+        error: 'Invalid postal code format',
+        code: 'INVALID_POSTAL_CODE',
+        field: 'intervieweePostalCode',
+      },
+    };
   }
 
   if (transformedAnswers.length > 0) {
@@ -239,6 +266,7 @@ export async function submitSurveyResponseFromBody(
     intervieweeEmail: email || (intervieweeEmail as string | undefined),
     intervieweePhone: intervieweePhone as string | undefined,
     intervieweeAddress: intervieweeAddress as string | undefined,
+    intervieweePostalCode: postalCode || (intervieweePostalCode as string | undefined),
   });
 
   try {

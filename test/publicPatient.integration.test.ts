@@ -51,6 +51,7 @@ describe('public patient submit', () => {
         status: 'completed',
         intervieweeName: 'Max Mustermann',
         intervieweeEmail: 'max@example.com',
+        intervieweePostalCode: '53111',
         birthDate: '1990-01-15',
         signatureBase64: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
         answers: [
@@ -66,6 +67,52 @@ describe('public patient submit', () => {
     expect(res.body.response.workflowStatus).toBe('pending_shk_followup');
     expect(res.body.response.patientBoundedSubmit).toBe(true);
     expect(res.body.response.draft).toBe(false);
+    expect(res.body.response.intervieweePostalCode).toBe('53111');
+  });
+
+  it('rejects completed patient response without a postal code', async () => {
+    if (!mongoReady) {
+      expect(true).toBe(true);
+      return;
+    }
+
+    const res = await request(app)
+      .post('/api/public/patient-responses')
+      .send({
+        status: 'completed',
+        intervieweeName: 'Max Mustermann',
+        intervieweeEmail: 'max@example.com',
+        birthDate: '1990-01-15',
+        signatureBase64: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+        answers: [],
+        boundedPatientSubmit: true,
+      });
+
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('MISSING_POSTAL_CODE');
+  });
+
+  it('rejects completed patient response with an invalid postal code format', async () => {
+    if (!mongoReady) {
+      expect(true).toBe(true);
+      return;
+    }
+
+    const res = await request(app)
+      .post('/api/public/patient-responses')
+      .send({
+        status: 'completed',
+        intervieweeName: 'Max Mustermann',
+        intervieweeEmail: 'max@example.com',
+        intervieweePostalCode: 'ABCDE',
+        birthDate: '1990-01-15',
+        signatureBase64: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+        answers: [],
+        boundedPatientSubmit: true,
+      });
+
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('INVALID_POSTAL_CODE');
   });
 
   it('rejects submit without signature', async () => {
