@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   parseEchoScreeningFromBody,
   parseEchoScreeningStored,
+  echoScreeningLinesForPdf,
   validEchoScreeningFixture,
 } from '../src/utils/shkEchoScreening';
 
@@ -106,5 +107,15 @@ describe('shkEchoScreening', () => {
       expect(stored?.main.aortic_valve).toEqual(['stenose']);
       expect(stored?.main.ascending_aorta).toEqual(['unauffaellig']);
     });
+  });
+
+  it('PDF lines list every selected value of a multi-select row', () => {
+    const f = validEchoScreeningFixture();
+    f.main.aortic_valve = ['stenose', 'insuffizienz'];
+    const lines = echoScreeningLinesForPdf(f);
+    const row = lines.find((l) => l.includes('Aortenklappe'))!;
+    expect(row).toContain('V.a. Stenose');
+    expect(row).toContain('V.a. Insuffizienz');
+    expect(lines.find((l) => l.includes('Mitralklappe'))).toContain('unauffällig');
   });
 });
