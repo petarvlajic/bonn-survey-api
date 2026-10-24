@@ -19,13 +19,17 @@ export type EchoValveValue = 'unauffaellig' | 'stenose' | 'insuffizienz' | 'auff
 export type EchoTricuspidValue = 'unauffaellig' | 'insuffizienz' | 'auffaellig';
 export type EchoAortaValue = 'unauffaellig' | 'dilatiert';
 
+/**
+ * Every row is multi-select (at least one value). `unauffaellig` is exclusive.
+ * Older clients send a single string; it is accepted and normalised to `[value]`.
+ */
 export type EchoMainValues = {
-  lv_function: EchoBinaryValue;
-  wall_motion: EchoBinaryValue;
-  aortic_valve: EchoValveValue;
-  mitral_valve: EchoValveValue;
-  tricuspid_valve: EchoTricuspidValue;
-  ascending_aorta: EchoAortaValue;
+  lv_function: EchoBinaryValue[];
+  wall_motion: EchoBinaryValue[];
+  aortic_valve: EchoValveValue[];
+  mitral_valve: EchoValveValue[];
+  tricuspid_valve: EchoTricuspidValue[];
+  ascending_aorta: EchoAortaValue[];
 };
 
 export const ECHO_BINARY_LABELS: Record<
@@ -146,12 +150,28 @@ function isValidAorta(v: unknown): v is EchoAortaValue {
   return v === 'unauffaellig' || v === 'dilatiert';
 }
 
-function validateMainRow(id: EchoMainRowId, v: unknown): v is EchoMainValues[typeof id] {
-  if (BINARY_IDS.has(id)) return isValidBinary(v);
-  if (VALVE_IDS.has(id)) return isValidValve(v);
-  if (id === 'tricuspid_valve') return isValidTricuspid(v);
-  if (id === 'ascending_aorta') return isValidAorta(v);
-  return false;
+/**
+ * Validates one main row and returns the normalised value list, or null when invalid.
+ * Accepts a single string (legacy) or an array; rejects empty, duplicate, unknown
+ * values, and `unauffaellig` combined with anything else.
+ */
+function normalizeMainRow(id: EchoMainRowId, v: unknown): string[] | null {
+  const list = Array.isArray(v) ? v : [v];
+  if (list.length === 0) return null;
+  const isValid = BINARY_IDS.has(id)
+    ? isValidBinary
+    : VALVE_IDS.has(id)
+      ? isValidValve
+      : id === 'tricuspid_valve'
+        ? isValidTricuspid
+        : id === 'ascending_aorta'
+          ? isValidAorta
+          : () => false;
+  if (!list.every(isValid)) return null;
+  const unique = Array.from(new Set(list as string[]));
+  if (unique.length !== list.length) return null;
+  if (unique.includes('unauffaellig') && unique.length > 1) return null;
+  return unique;
 }
 
 function normalizeStoredMain(mainRaw: Record<string, unknown>): Record<string, unknown> {
@@ -188,15 +208,15 @@ export function parseEchoScreeningFromBody(body: unknown):
 
   const main = {} as EchoMainValues;
   for (const id of ECHO_MAIN_ROW_IDS) {
-    const v = (mainRaw as Record<string, unknown>)[id];
-    if (!validateMainRow(id, v)) {
+    const normalized = normalizeMainRow(id, (mainRaw as Record<string, unknown>)[id]);
+    if (!normalized) {
       return {
         ok: false,
-        error: `Für "${id}" muss genau eine gültige Auswahl getroffen werden.`,
+        error: `Für "${id}" muss mindestens eine gültige Auswahl getroffen werden ("unauffällig" nicht mit anderen kombinieren).`,
         code: 'ECHO_MAIN_INCOMPLETE',
       };
     }
-    (main as Record<EchoMainRowId, string>)[id] = v as string;
+    (main as Record<EchoMainRowId, string[]>)[id] = normalized;
   }
 
   const optional: Record<EchoOptionalId, boolean> = {
@@ -236,12 +256,12 @@ export function parseEchoScreeningFromBody(body: unknown):
 export function validEchoScreeningFixture(): EchoScreeningPayload {
   return {
     main: {
-      lv_function: 'unauffaellig',
-      wall_motion: 'unauffaellig',
-      aortic_valve: 'unauffaellig',
-      mitral_valve: 'unauffaellig',
-      tricuspid_valve: 'unauffaellig',
-      ascending_aorta: 'unauffaellig',
+      lv_function: ['unauffaellig'],
+      wall_motion: ['unauffaellig'],
+      aortic_valve: ['unauffaellig'],
+      mitral_valve: ['unauffaellig'],
+      tricuspid_valve: ['unauffaellig'],
+      ascending_aorta: ['unauffaellig'],
     },
     optional: {
       pericardial_effusion: false,
@@ -252,7 +272,7 @@ export function validEchoScreeningFixture(): EchoScreeningPayload {
   };
 }
 
-function formatMainValueForPdf(id: EchoMainRowId, v: string): string {
+function formatSingleMainValueForPdf(id: EchoMainRowId, v: string): string {
   if (BINARY_IDS.has(id)) {
     const labels = ECHO_BINARY_LABELS[id as 'lv_function' | 'wall_motion'];
     return v === 'unauffaellig'
@@ -274,6 +294,10 @@ function formatMainValueForPdf(id: EchoMainRowId, v: string): string {
     return opt?.labelDe ?? v;
   }
   return v;
+}
+
+function formatMainValueForPdf(id: EchoMainRowId, values: string[]): string {
+  return values.map((v) => formatSingleMainValueForPdf(id, v)).join('; ');
 }
 
 /** Best-effort parse of persisted `shkFollowUp.echoScreening`. */

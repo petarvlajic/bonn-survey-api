@@ -230,7 +230,7 @@ describe('SHK echo follow-up (HTTP e2e)', () => {
     await request(app).post(`/api/responses/${rid}/lock`).set('x-user-id', owner);
 
     const payload = validEchoScreeningFixture();
-    payload.main.mitral_valve = 'auffaellig';
+    payload.main.mitral_valve = ['auffaellig'];
     payload.optional.pericardial_effusion = true;
     payload.optional.rv_enlargement = true;
     payload.overall = 'needs_followup';
@@ -243,7 +243,7 @@ describe('SHK echo follow-up (HTTP e2e)', () => {
     expect(done.body.response.shkFollowUp?.echoScreening?.optional?.pericardial_effusion).toBe(true);
     expect(done.body.response.shkFollowUp?.echoScreening?.optional?.rv_enlargement).toBe(true);
     expect(done.body.response.shkFollowUp?.echoScreening?.overall).toBe('needs_followup');
-    expect(done.body.response.shkFollowUp?.echoScreening?.main?.mitral_valve).toBe('auffaellig');
+    expect(done.body.response.shkFollowUp?.echoScreening?.main?.mitral_valve).toEqual(['auffaellig']);
 
     const getRes = await request(app).get(`/api/responses/${rid}`).set('x-user-id', owner);
     expect(getRes.status).toBe(200);
@@ -430,7 +430,7 @@ describe('SHK echo follow-up (HTTP e2e)', () => {
       expect(lockRes.body.response.lockedBy).toBeTruthy();
 
       const echo = validEchoScreeningFixture();
-      echo.main.aortic_valve = 'auffaellig';
+      echo.main.aortic_valve = ['stenose', 'insuffizienz'];
       echo.optional.pericardial_effusion = true;
       echo.overall = 'needs_followup';
 
@@ -442,7 +442,7 @@ describe('SHK echo follow-up (HTTP e2e)', () => {
       expect(done.status).toBe(200);
       expect(done.body.message).toMatch(/Follow-up completed/i);
       expect(done.body.response.workflowStatus).toBe('closed');
-      expect(done.body.response.shkFollowUp?.echoScreening?.main?.aortic_valve).toBe('auffaellig');
+      expect(done.body.response.shkFollowUp?.echoScreening?.main?.aortic_valve).toEqual(['stenose', 'insuffizienz']);
       expect(done.body.response.shkFollowUp?.echoScreening?.optional?.pericardial_effusion).toBe(true);
       expect(done.body.response.shkFollowUp?.echoScreening?.overall).toBe('needs_followup');
       expect(done.body.response.shkFollowUp?.completedAt).toBeTruthy();
