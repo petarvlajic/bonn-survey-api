@@ -58,6 +58,7 @@ describe('public patient submit', () => {
           { questionId: 'firstName', type: 'TEXT', value: 'Max' },
           { questionId: 'lastName', type: 'TEXT', value: 'Mustermann' },
           { questionId: 'email', type: 'TEXT', value: 'max@example.com' },
+          { questionId: 'location', type: 'TEXT', value: 'Beuel' },
         ],
         boundedPatientSubmit: true,
       });
@@ -113,6 +114,29 @@ describe('public patient submit', () => {
 
     expect(res.status).toBe(400);
     expect(res.body.code).toBe('INVALID_POSTAL_CODE');
+  });
+
+  it('rejects completed patient response without a location (Standort)', async () => {
+    if (!mongoReady) {
+      expect(true).toBe(true);
+      return;
+    }
+
+    const res = await request(app)
+      .post('/api/public/patient-responses')
+      .send({
+        status: 'completed',
+        intervieweeName: 'Max Mustermann',
+        intervieweeEmail: 'max@example.com',
+        intervieweePostalCode: '53111',
+        birthDate: '1990-01-15',
+        signatureBase64: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+        answers: [],
+        boundedPatientSubmit: true,
+      });
+
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('MISSING_LOCATION');
   });
 
   it('rejects submit without signature', async () => {

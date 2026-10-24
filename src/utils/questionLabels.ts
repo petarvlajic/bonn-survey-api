@@ -40,6 +40,11 @@ export const QUESTION_LABELS: Record<string, string> = {
   intervieweePhone: 'Handy / Telefon',
   intervieweeAddress: 'Adresse',
   intervieweePostalCode: 'Postleitzahl (PLZ)',
+  location: 'Standort',
+  familyDoctor: 'Hausarzt',
+  cardiologist: 'Kardiologe',
+  firstName: 'Vorname',
+  lastName: 'Nachname',
   preferredContactMethod: 'Wie möchten Sie bevorzugt kontaktiert werden?',
   signature: 'Signature',
 };
