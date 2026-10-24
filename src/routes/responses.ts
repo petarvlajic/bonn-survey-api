@@ -1,3 +1,4 @@
+import { validateLocationAnswer } from '../utils/locations';
 import express, { Request, Response } from 'express';
 import { Response as ResponseModel } from '../models/Response';
 import { DeletedResponseArchive } from '../models/DeletedResponseArchive';
@@ -442,6 +443,12 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
     const answersArray = answers || (answer ? [answer] : []);
 
     const transformedAnswers = transformAnswersForStorage(answersArray as Record<string, unknown>[]);
+
+    const locationError = validateLocationAnswer(transformedAnswers, { required: false });
+    if (locationError) {
+      res.status(400).json(locationError);
+      return;
+    }
 
     if (gender !== undefined && gender !== null && gender !== '' && !isValidGender(gender)) {
       res.status(400).json({
@@ -915,7 +922,13 @@ router.put('/:id', authenticate, async (req: Request, res: Response) => {
     }
 
     if (answers !== undefined) {
-      response.answers = transformAnswersForStorage(answers as Record<string, unknown>[]);
+      const nextAnswers = transformAnswersForStorage(answers as Record<string, unknown>[]);
+      const locationError = validateLocationAnswer(nextAnswers, { required: false });
+      if (locationError) {
+        res.status(400).json(locationError);
+        return;
+      }
+      response.answers = nextAnswers;
     }
     if (signatureBase64 !== undefined) response.signatureBase64 = signatureBase64;
     if (draft !== undefined) response.draft = draft;

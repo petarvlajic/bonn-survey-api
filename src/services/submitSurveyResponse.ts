@@ -3,6 +3,7 @@ import { Response as ResponseModel } from '../models/Response';
 import { normalizeAnswersForStorage } from '../utils/answerDisplay';
 import { generatePid } from '../utils/pid';
 import { extractGenderFromAnswers, isValidGender } from '../utils/gender';
+import { validateLocationAnswer } from '../utils/locations';
 
 export type SubmitSurveyBody = Record<string, unknown>;
 
@@ -174,6 +175,13 @@ export async function submitSurveyResponseFromBody(
         field: 'intervieweePostalCode',
       },
     };
+  }
+
+  const locationError = validateLocationAnswer(transformedAnswers, {
+    required: !!options.requireCompleted,
+  });
+  if (locationError) {
+    return { ok: false, status: 400, payload: locationError };
   }
 
   if (transformedAnswers.length > 0) {
