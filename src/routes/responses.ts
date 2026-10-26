@@ -1316,6 +1316,82 @@ router.post('/:id/lock', authenticate, async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * Re-send the consent PDF e-mail for a finished report (e.g. the patient lost it).
+ * Only allowed once the report is done: not a draft, and for patient-bounded submits
+ * only after the SHK follow-up is completed (that is when the first e-mail goes out).
+ */
+router.post('/:id/resend-email', authenticate, async (req: Request, res: Response) => {
+  try {
+    const doc = await ResponseModel.findById(req.params.id).populate(
+      'userId',
+      'email profile.firstName profile.lastName profile.examinerSignatureBase64'
+    );
+    if (!doc || doc.deletedAt) {
+      res.status(404).json({ error: 'Response not found', code: 'RESPONSE_NOT_FOUND' });
+      return;
+    }
+    if (!doc.intervieweeEmail?.trim()) {
+      res.status(400).json({
+        error: 'No e-mail address stored for this response',
+        code: 'MISSING_EMAIL',
+      });
+      return;
+    }
+    const followUpDone = Boolean(doc.shkFollowUp?.completedAt);
+    if (doc.draft || (doc.patientBoundedSubmit && !followUpDone)) {
+      res.status(409).json({
+        error: 'E-mail can only be re-sent after the report is completed',
+        code: 'RESPONSE_NOT_COMPLETED',
+      });
+      return;
+    }
+
+    const sender = await User.findById(req.user!._id).select(
+      'profile.firstName profile.lastName profile.examinerSignatureBase64'
+    );
+    const examinerName = [sender?.profile?.firstName, sender?.profile?.lastName]
+      .filter(Boolean)
+      .join(' ')
+      .trim();
+
+    const consentBuf = await buildFinalConsentEmailPdf(doc, {
+      examinerSignatureBase64: sender?.profile?.examinerSignatureBase64,
+      examinerName: examinerName || undefined,
+    });
+    if (!consentBuf) {
+      res.status(500).json({ error: 'Could not build the consent PDF', code: 'PDF_BUILD_FAILED' });
+      return;
+    }
+
+    try {
+      await sendConsentEmailWithPdf(
+        doc.intervieweeEmail,
+        doc.intervieweeName,
+        doc.birthDate,
+        consentBuf
+      );
+    } catch (mailErr: unknown) {
+      console.error('[API] Resend consent email failed:', (mailErr as Error).message);
+      res.status(502).json({ error: 'E-mail could not be sent', code: 'EMAIL_SEND_FAILED' });
+      return;
+    }
+
+    doc.changeLog.push({
+      changedBy: req.user!._id as any,
+      changedAt: new Date(),
+      source: 'SHK',
+      reason: `Consent e-mail re-sent to ${doc.intervieweeEmail}`,
+      changes: [],
+    });
+    await doc.save();
+
+    res.json({ message: 'E-mail sent', sentTo: doc.intervieweeEmail });
+  } catch (error) {
+    throw error;
+  }
+});
+
 // Unlock response after SHK editing
 router.post('/:id/unlock', authenticate, async (req: Request, res: Response) => {
   try {
