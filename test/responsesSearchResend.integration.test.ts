@@ -4,7 +4,7 @@ import request from 'supertest';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import { Response as ResponseModel } from '../src/models/Response';
-import '../src/models/User';
+import { User } from '../src/models/User';
 
 vi.mock('../src/middleware/auth', () => ({
   authenticate: (req: any, _res: any, next: any) => {
@@ -49,7 +49,10 @@ describe('responses search + resend e-mail', () => {
     sendConsent.mockImplementation(async () => undefined);
   });
   afterEach(async () => {
-    if (mongoReady) await ResponseModel.deleteMany({});
+    if (mongoReady) {
+      await ResponseModel.deleteMany({});
+      await User.deleteMany({});
+    }
   });
   afterAll(async () => {
     if (!mongoReady) return;
@@ -133,6 +136,55 @@ describe('responses search + resend e-mail', () => {
       expect(pending).not.toContain(doneId);
     });
 
+    it('finds by phone number and is case-insensitive', async () => {
+      if (!mongoReady) return;
+      const id = await create({ intervieweePhone: '+49 228 123456' });
+      await create({ intervieweeName: 'Other', answers: [] });
+      expect(await search('228 123456')).toEqual([id]); // two tokens, both inside the phone number
+      expect(await search('POPOVIĆ')).toEqual([id]);
+    });
+
+    it('does not match arbitrary answer values (no noise from e.g. "Nein")', async () => {
+      if (!mongoReady) return;
+      await create({
+        answers: [
+          { questionId: 'firstName', type: 'TEXT', value: 'Stefan' },
+          { questionId: 'lastName', type: 'TEXT', value: 'Popović' },
+          { questionId: 'hasChestComplaints', type: 'SINGLE_CHOICE', value: 'Nein' },
+          { questionId: 'familyDoctor', type: 'TEXT', value: 'Dr. Zimmermann' },
+        ],
+      });
+      expect(await search('nein')).toEqual([]);
+      expect(await search('zimmermann')).toEqual([]);
+    });
+
+    it('only uses the first 6 tokens', async () => {
+      if (!mongoReady) return;
+      const id = await create();
+      expect(await search('stefan petar popović stefan petar popović nomatch')).toEqual([id]);
+    });
+
+    it('applies search and a day range together', async () => {
+      if (!mongoReady) return;
+      const id = await create();
+      const otherDay = await create({ intervieweeName: 'Stefan Popović Zwei' });
+      await ResponseModel.collection.updateOne(
+        { _id: new mongoose.Types.ObjectId(otherDay) },
+        { $set: { createdAt: new Date('2020-01-01T12:00:00.000Z') } }
+      );
+      expect(await search('popović')).toHaveLength(2);
+      const today = new Date().toISOString().slice(0, 10);
+      const both = await search('popović', `&createdAtFrom=${today}&createdAtTo=${today}`);
+      expect(both).toEqual([id]);
+    });
+
+    it('does not return soft-deleted reports', async () => {
+      if (!mongoReady) return;
+      const id = await create();
+      await ResponseModel.updateOne({ _id: id }, { $set: { deletedAt: new Date() } });
+      expect(await search('popović')).toEqual([]);
+    });
+
     it('filters a single day in Berlin time, not UTC', async () => {
       if (!mongoReady) return;
       const id = await create();
@@ -189,6 +241,40 @@ describe('responses search + resend e-mail', () => {
       const res = await resend(pendingId);
       expect(res.status).toBe(409);
       expect(sendConsent).not.toHaveBeenCalled();
+    });
+
+    it('also works for closed reports', async () => {
+      if (!mongoReady) return;
+      const id = await create({ workflowStatus: 'closed' });
+      const res = await resend(id);
+      expect(res.status).toBe(200);
+      expect(sendConsent).toHaveBeenCalledTimes(1);
+    });
+
+    it('404 for soft-deleted reports', async () => {
+      if (!mongoReady) return;
+      const id = await create();
+      await ResponseModel.updateOne({ _id: id }, { $set: { deletedAt: new Date() } });
+      expect((await resend(id)).status).toBe(404);
+      expect(sendConsent).not.toHaveBeenCalled();
+    });
+
+    it("builds the PDF with the re-sending SHK's examiner signature and name", async () => {
+      if (!mongoReady) return;
+      const shk = await User.create({
+        email: 'shk@ukbonn.de',
+        password: 'x'.repeat(12),
+        profile: { firstName: 'Sabine', lastName: 'Schwarz', examinerSignatureBase64: 'data:image/png;base64,AAAA' },
+      });
+      const id = await create();
+      const res = await request(app)
+        .post(`/api/responses/${id}/resend-email`)
+        .set('x-user-id', String(shk._id));
+      expect(res.status).toBe(200);
+      expect(vi.mocked(buildFinalConsentEmailPdf).mock.calls.at(-1)![1]).toMatchObject({
+        examinerSignatureBase64: 'data:image/png;base64,AAAA',
+        examinerName: 'Sabine Schwarz',
+      });
     });
 
     it('502 when the mail provider fails, and nothing is logged', async () => {
