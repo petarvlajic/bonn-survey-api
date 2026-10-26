@@ -97,4 +97,19 @@ describe('search filter', () => {
     const { filter } = buildResponsesFilterFromQuery({ search: '   ' });
     expect(filter.$and).toBeUndefined();
   });
+
+  it('caps the search at 6 tokens', () => {
+    expect(ands({ search: 'a b c d e f g h' })).toHaveLength(6);
+  });
+
+  it('turns impossible dates into a harmless exact match instead of throwing', () => {
+    const [first] = ands({ search: '31.02.2020' });
+    expect(first.$or).toContainEqual({ birthDate: '2020-02-31' });
+  });
+
+  it('matches phone numbers and PIDs too', () => {
+    const [first] = ands({ search: '0228' });
+    const fields = first.$or.map((c) => Object.keys(c)[0]);
+    expect(fields).toEqual(expect.arrayContaining(['intervieweePhone', 'pid']));
+  });
 });
