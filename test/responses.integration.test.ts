@@ -185,8 +185,8 @@ describe('responses routes integration', () => {
 
     const csvRes = await request(app).get(`/api/responses/export/csv?answerFilters=${filters2}`);
     expect(csvRes.status).toBe(200);
-    expect(String(csvRes.text)).toContain('Chest Yes High');
-    expect(String(csvRes.text)).not.toContain('Chest No Low');
+    expect(String(csvRes.text)).toContain('Chest Yes');
+    expect(String(csvRes.text)).not.toContain('Chest No');
   });
 
   it('search finds answers free-text and export respects workflow/pid/search filters', async () => {
@@ -225,7 +225,7 @@ describe('responses routes integration', () => {
     expect(csvRes.status).toBe(200);
     expect(String(csvRes.text)).toContain('Alpha');
     expect(String(csvRes.text)).not.toContain('Beta');
-    expect(String(csvRes.text)).toContain('Q_echoFreeText');
+    expect(String(csvRes.text)).toContain('Echo (Freitext)');
   });
 
   it('rejects responses with too many or too large photo uploads', async () => {

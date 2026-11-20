@@ -1681,11 +1681,11 @@ router.get('/export/csv', authenticate, async (req: Request, res: Response) => {
 
     const responses = await ResponseModel.find(filter)
       .populate('userId', 'email profile.firstName profile.lastName profile.examinerSignatureBase64')
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: 1 });
 
     const csv = buildResponseCsv(responses as any[]);
 
-    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader(
       'Content-Disposition',
       `attachment; filename="survey-responses-${new Date().toISOString().split('T')[0]}.csv"`
